@@ -1,0 +1,4 @@
+# Parameter for program flow
+1					iFlow (Flag for controlling the continuation of the program); 0:stop, 1:continue
+1		100		iWriteScreen & nWriteScreen (flag to writing to screen); 0:not write, 1:write; (frequency of iMove for writing on screen) 
+1		100		iWriteFile & nWriteFile (flag to writing MC progress to file); 0:not write, 1:write; (frequency of iMove for writing on file) 
