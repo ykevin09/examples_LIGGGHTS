@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<VTKFile type="RectilinearGrid" version="0.1" byte_order="LittleEndian" header_type="UInt32">
+  <RectilinearGrid WholeExtent="0 1 0 1 0 1">
+  <Piece Extent="0 1 0 1 0 1">
+    <PointData>
+    </PointData>
+    <CellData>
+    </CellData>
+    <Coordinates>
+      <DataArray type="Float64" Name="Array 0x7f8197525840" format="ascii" RangeMin="-0.00027115565547704214" RangeMax="0.011971155655563802">
+        -0.00027115565547704214 0.011971155655563802
+      </DataArray>
+      <DataArray type="Float64" Name="Array 0x7f81975259b0" format="ascii" RangeMin="-0.00027115565547704214" RangeMax="0.011971155655563802">
+        -0.00027115565547704214 0.011971155655563802
+      </DataArray>
+      <DataArray type="Float64" Name="Array 0x7f8197525b20" format="ascii" RangeMin="-0.000278000020001172" RangeMax="0.0119780000200879">
+        -0.000278000020001172 0.0119780000200879
+      </DataArray>
+    </Coordinates>
+  </Piece>
+  </RectilinearGrid>
+</VTKFile>

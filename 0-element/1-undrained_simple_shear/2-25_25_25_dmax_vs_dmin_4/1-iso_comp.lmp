@@ -1,0 +1,310 @@
+#********************************************************************************#
+# @Author : Ming Yang
+# @Email  : ykevin09@gmail.com
+# @Date   : 2021-01-06
+# @Last Modified by     : Ming Yang
+# @Lost Modified Time   : 2021-05-15
+# @Function  : Isotropic compression via servo control on six mesh plates
+#       1. Compress the sample isotropically until p=10kPa
+#
+#
+# @Reference : 
+#********************************************************************************#
+###Initialization
+#preliminaries
+units           si
+atom_style      granular
+atom_modify     map array
+boundary        m m m
+newton          off
+communicate     single vel yes
+#declare computation domain
+read_restart    restart/consol_0.equil
+#neighbor listing
+neighbor        0.0001 bin
+neigh_modify    delay 0 #every 100
+
+###Setup
+#material and interaction properties required
+variable 	    atomEY equal 7.0e10 #1GP=1e9Pa
+variable 	    atomPO equal 0.25
+variable 	    atomCOR equal 0.8
+variable        atomCOF equal 0.1
+variable        atomWallCOF equal 0.0
+variable        atomCORF equal 0.1
+variable        atomWallCORF equal 0.0
+variable        atomCORVD equal 0.13
+variable 	    atomRS equal 2.25
+hard_particles  yes
+fix             mEY all property/global youngsModulus peratomtype ${atomEY} ${atomEY} 
+fix             mPO all property/global poissonsRatio peratomtype ${atomPO} ${atomPO}
+fix             mCOR all property/global coefficientRestitution peratomtypepair 2 ${atomCOR} ${atomCOR} ${atomCOR} ${atomCOR}
+fix             mCOF all property/global coefficientFriction peratomtypepair 2 ${atomCOF} ${atomWallCOF} ${atomWallCOF} ${atomWallCOF}
+fix             mCORF all property/global coefficientRollingFriction peratomtypepair 2 ${atomCORF} ${atomWallCORF} ${atomWallCORF} ${atomWallCORF}
+fix             mCORVD all property/global coefficientRollingViscousDamping peratomtypepair 2 ${atomCORVD} ${atomCORVD} ${atomCORVD} ${atomCORVD}
+fix             mRS all property/global rollingStiffness scalar ${atomRS}
+#
+#initial positions of stress walls
+variable        xl0 equal -0.00024
+variable        yl0 equal -0.00024 
+variable        zl0 equal -0.00024
+variable        xh0 equal 0.01132 
+variable        yh0 equal 0.01132
+variable        zh0 equal 0.01132
+variable        xa0 equal 0.5*(${xl0}+${xh0})
+variable        ya0 equal 0.5*(${yl0}+${yh0})
+variable        za0 equal 0.5*(${zl0}+${zh0})
+variable        mslx0 equal ${xh0}-${xl0}
+variable        msly0 equal ${yh0}-${yl0}
+variable        mslz0 equal ${zh0}-${zl0}
+variable        SCALE0 equal 1.00
+#
+fix             xlwall0 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE0} &
+                    rotate axis 0 1 0 angle 90 move ${xl0} ${ya0} ${za0} reference_point ${xl0} ${ya0} ${za0}
+fix             xhwall0 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE0} &
+                    rotate axis 0 1 0 angle 90 move ${xh0} ${ya0} ${za0} reference_point ${xh0} ${ya0} ${za0}
+fix             ylwall0 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE0} &
+                    rotate axis 1 0 0 angle 90 move ${xa0} ${yl0} ${za0} reference_point ${xa0} ${yl0} ${za0}
+fix             yhwall0 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE0} &
+                    rotate axis 1 0 0 angle 90 move ${xa0} ${yh0} ${za0} reference_point ${xa0} ${yh0} ${za0}
+fix             zlwall0 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE0} &
+                    move ${xa0} ${ya0} ${zl0} reference_point ${xa0} ${ya0} ${zl0}
+fix             zhwall0 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE0} &
+                    move ${xa0} ${ya0} ${zh0} reference_point ${xa0} ${ya0} ${zh0}
+fix             walls0 all wall/gran model hertz tangential no_history mesh n_meshes 6 &
+                    meshes xlwall0 ylwall0 zlwall0 xhwall0 yhwall0 zhwall0
+#
+#replace stress walls with servo walls
+variable        temp equal f_xlwall0[7]
+variable        xlw07 equal ${temp}
+variable        temp equal f_xhwall0[7]
+variable        xhw07 equal ${temp}
+variable        temp equal f_ylwall0[8]
+variable        ylw08 equal ${temp}
+variable        temp equal f_yhwall0[8]
+variable        yhw08 equal ${temp}
+variable        temp equal f_zlwall0[9]
+variable        zlw09 equal ${temp}
+variable        temp equal f_zhwall0[9]
+variable        zhw09 equal ${temp}
+variable        xaw07 equal 0.5*(${xlw07}+${xhw07})
+variable        yaw08 equal 0.5*(${ylw08}+${yhw08})
+variable        zaw09 equal 0.5*(${zlw09}+${zhw09})
+unfix           walls0
+unfix           xlwall0
+unfix           ylwall0
+unfix           zlwall0
+unfix           xhwall0
+unfix           yhwall0
+unfix           zhwall0
+#
+variable        servoForce equal 0.001
+variable        servoVmax equal 0.2
+variable        servoKp equal 0.05
+variable        servoKi equal 0.0
+variable        servoKd equal 0.0
+variable        servoRatio equal 0.01
+variable        mslx1 equal ${xhw07}-${xlw07}
+variable        msly1 equal ${yhw08}-${ylw08}
+variable        mslz1 equal ${zhw09}-${zlw09}
+variable        msltmp equal (${mslx1}>=${msly1})*${mslx1}+(${mslx1}<${msly1})*${msly1}
+variable        msl1 equal (${msltmp}>=${mslz1})*${msltmp}+(${msltmp}<${mslz1})*${mslz1}
+variable        servoScale equal 1.2*${msl1}/${mslx0}
+fix             sxlwall1 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale ${servoScale} &
+                    rotate axis 0 1 0 angle 90 move ${xlw07} ${yaw08} ${zaw09} com ${xlw07} ${yaw08} ${zaw09} &
+                    ctrlPV force axis +1 0 0 target_val ${servoForce} vel_max ${servoVmax} &
+                    kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             sxhwall1 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale ${servoScale} &
+                    rotate axis 0 1 0 angle 90 move ${xhw07} ${yaw08} ${zaw09} com ${xhw07} ${yaw08} ${zaw09} &
+                    ctrlPV force axis -1 0 0 target_val ${servoForce} vel_max ${servoVmax} &
+                    kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             sylwall1 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale ${servoScale} &
+                    rotate axis 1 0 0 angle 90 move ${xaw07} ${ylw08} ${zaw09} com ${xaw07} ${ylw08} ${zaw09} &
+                    ctrlPV force axis 0 +1 0 target_val ${servoForce} vel_max ${servoVmax} &
+                    kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             syhwall1 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale ${servoScale} &
+                    rotate axis 1 0 0 angle 90 move ${xaw07} ${yhw08} ${zaw09} com ${xaw07} ${yhw08} ${zaw09} &
+                    ctrlPV force axis 0 -1 0 target_val ${servoForce} vel_max ${servoVmax} &
+                    kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szlwall1 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale ${servoScale} &
+                    move ${xaw07} ${yaw08} ${zlw09} com ${xaw07} ${yaw08} ${zlw09} ctrlPV force axis 0 0 +1 &
+                    target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szhwall1 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale ${servoScale} &
+                    move ${xaw07} ${yaw08} ${zhw09} com ${xaw07} ${yaw08} ${zhw09} ctrlPV force axis 0 0 -1 & 
+                    target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             swalls1 all wall/gran model hertz tangential no_history mesh n_meshes 6 &
+                    meshes sxlwall1 sylwall1 szlwall1 sxhwall1 syhwall1 szhwall1
+#
+variable        sxlw17 equal f_sxlwall1[7]
+variable        sxhw17 equal f_sxhwall1[7]
+variable        sylw18 equal f_sylwall1[8]
+variable        syhw18 equal f_syhwall1[8]
+variable        szlw19 equal f_szlwall1[9]
+variable        szhw19 equal f_szhwall1[9]
+variable        sw1Axy equal (v_sxhw17-v_sxlw17)*(v_syhw18-v_sylw18)
+variable        sw1Ayz equal (v_syhw18-v_sylw18)*(v_szhw19-v_szlw19)
+variable        sw1Axz equal (v_sxhw17-v_sxlw17)*(v_szhw19-v_szlw19)
+variable        bvol equal (v_sxhw17-v_sxlw17)*(v_syhw18-v_sylw18)*(v_szhw19-v_szlw19) #Sample volume
+variable        targetP0 equal 1.0e4
+variable        targetK0 equal 1.0
+variable        szzTarget equal 3*${targetP0}/(1+2*${targetK0})
+variable        sxxTarget equal ${targetK0}*${szzTarget}
+variable        syyTarget equal ${targetK0}*${szzTarget}
+variable        sw1fxy equal ${szzTarget}*v_sw1Axy
+variable        sw1fyz equal ${sxxTarget}*v_sw1Ayz
+variable        sw1fxz equal ${syyTarget}*v_sw1Axz
+fix_modify      sxlwall1 servo/target_val v_sw1fyz
+fix_modify      sxhwall1 servo/target_val v_sw1fyz
+fix_modify      sylwall1 servo/target_val v_sw1fxz
+fix_modify      syhwall1 servo/target_val v_sw1fxz
+fix_modify      szlwall1 servo/target_val v_sw1fxy
+fix_modify      szhwall1 servo/target_val v_sw1fxy
+#
+#define the physics
+pair_style      gran model hertz tangential history rolling_friction epsd3&
+                    limitForce on torsionTorque on
+pair_coeff      * *
+#
+group           atomAll type 1
+#
+###Detailed settings
+#integrator
+fix             integr all nve/sphere
+#timestep
+timestep        2.0e-9
+fix             ctg all check/timestep/gran 1000 0.05 0.05
+###Execution and further settings
+variable        hstep equal 10000
+#atom property and stress
+compute         atomProp all property/atom mass diameter z vx vy vz fx fy fz tqx tqy tqz
+compute         atomDmin all reduce min c_atomProp[2]
+variable        aDmin equal c_atomDmin
+variable        atomV atom c_atomProp[4]^2+c_atomProp[5]^2+c_atomProp[6]^2
+compute         atomVmax all reduce max v_atomV
+variable        aVmax equal sqrt(c_atomVmax)
+variable        atomF atom c_atomProp[7]^2+c_atomProp[8]^2+c_atomProp[9]^2
+compute         atomFmax all reduce max v_atomF
+variable        aFmax equal sqrt(c_atomFmax)
+variable        atomT atom c_atomProp[10]^2+c_atomProp[11]^2+c_atomProp[12]^2
+compute         atomTmax all reduce max v_atomT
+variable        aTmax equal sqrt(c_atomTmax)
+variable        atomEk atom 0.5*c_atomProp[1]*(c_atomProp[4]^2+c_atomProp[5]^2+c_atomProp[6]^2)
+compute         atomEkmax all reduce max v_atomEk
+variable        aEkmax equal c_atomEkmax
+#
+#homogenization based on the whole volume
+compute         atomStress all stress/atom virial
+compute         bvolStress all reduce sum c_atomStress[1] c_atomStress[2] c_atomStress[3]&
+                                          c_atomStress[4] c_atomStress[5] c_atomStress[6]
+variable        pBvol equal -(c_bvolStress[1]+c_bvolStress[2]+c_bvolStress[3])/3/v_bvol
+variable        sxxBvol equal -(c_bvolStress[1])/v_bvol
+variable        syyBvol equal -(c_bvolStress[2])/v_bvol
+variable        szzBvol equal -(c_bvolStress[3])/v_bvol
+variable        sxyBvol equal (c_bvolStress[4])/v_bvol
+variable        sxzBvol equal (c_bvolStress[5])/v_bvol
+variable        syzBvol equal (c_bvolStress[6])/v_bvol
+variable        volMass equal mass(atomAll)/2650.0
+variable        eBvol equal (v_bvol-v_volMass)/v_volMass
+#
+compute         eng all ke
+variable        oke equal c_eng
+#
+#particle-particle and particle-wall contact info
+#compute         pp all pair/gran/local pos id force force_normal force_tangential delta
+#compute         pw all wall/gran/local pos id force force_normal force_tangential delta
+#history
+#dump            dpp all local ${hstep} output/1-comp/contact/ppcontact-*.dat &
+#                    c_pp[1] c_pp[2] c_pp[3] &
+#                    c_pp[4] c_pp[5] c_pp[6] c_pp[7] c_pp[8] c_pp[9] & 
+#                    c_pp[10] c_pp[11] c_pp[12] &
+#                    c_pp[13] c_pp[14] c_pp[15] &
+#                    c_pp[16] c_pp[17] c_pp[18] &
+#                    c_pp[19]
+#dump            dpw all local ${hstep} output/1-comp/contact/pwcontact-*.dat & 
+#                    c_pw[1] c_pw[2] c_pw[3] & 
+#                    c_pw[4] c_pw[5] c_pw[6] c_pw[7] c_pw[8] c_pw[9] &
+#                    c_pw[10] c_pw[11] c_pw[12] &
+#                    c_pw[13] c_pw[14] c_pw[15] &
+#                    c_pw[16] c_pw[17] c_pw[18] &
+#                    c_pw[19]
+#
+#state
+variable        ostep equal step
+variable        sxlw1Sxx equal f_sxlwall1[1]/v_sw1Ayz
+variable        sxhw1Sxx equal f_sxhwall1[1]/v_sw1Ayz
+variable        sylw1Syy equal f_sylwall1[2]/v_sw1Axz
+variable        syhw1Syy equal f_syhwall1[2]/v_sw1Axz
+variable        szlw1Szz equal f_szlwall1[3]/v_sw1Axy
+variable        szhw1Szz equal f_szhwall1[3]/v_sw1Axy
+#
+#variable for compression: quasi-static
+variable        Imax equal 1.0e-3
+variable        rho equal 2650.0
+variable        pMin equal 0.01e5
+variable        pI equal (v_pBvol>=${pMin})*v_pBvol+(v_pBvol<${pMin})*${pMin}
+variable        dezz equal (${Imax}/v_aDmin)*sqrt(v_pI/${rho})
+variable        vzMax equal v_dezz*(${szhw19}-${szlw19}) #compression
+variable        velz equal -${servoKp}*v_sw1Axy*(${szzTarget}-v_szhw1Szz)
+#
+#practical equilibrium condition
+variable        tolF1 equal v_pBvol*v_aDmin*v_aDmin
+variable        aFtol equal 1e-4*v_tolF1
+variable        aTtol equal 1e-4*v_tolF1*v_aDmin
+variable        aEktol equal 1e-8*v_tolF1*v_aDmin
+variable        isEqSxx equal abs(${sxxTarget}-v_sxhw1Sxx)/${sxxTarget}<1e-4
+variable        isEqSyy equal abs(${syyTarget}-v_syhw1Syy)/${syyTarget}<1e-4
+variable        isEqSzz equal abs(${szzTarget}-v_szhw1Szz)/${szzTarget}<1e-4
+variable        isEqForce equal v_aFmax<v_aFtol
+variable        isEqTorque equal v_aTmax<v_aTtol
+variable        isEqEk equal v_aEkmax<v_aEktol
+variable        isEq equal v_isEqSxx*v_isEqSyy*v_isEqSzz*v_isEqForce*v_isEqTorque*v_isEqEk
+#variable for running
+variable        totalStep equal (2e5-step)
+#
+shell           mkdir output
+shell           mkdir output/1-comp
+shell           mkdir output/1-comp/visualization
+#
+print             "N ke bvol eBvol&
+ xl yl zl xh yh zh&
+ sxxLeft sxxRight syyBack syyFront szzBot szzTop pBvol" &
+    file output/1-comp/macro.txt screen no
+#
+print           "N aFmax aFtol aTmax aTtol aEkmax aEktol" &
+    file output/1-comp/check.txt screen no
+#
+fix             macroOutput all print ${hstep} &
+                    "${ostep} ${oke} ${bvol} ${eBvol}& 
+ ${sxlw17} ${sylw18} ${szlw19} ${sxhw17} ${syhw18} ${szhw19}&
+ ${sxlw1Sxx} ${sxhw1Sxx} ${sylw1Syy} ${syhw1Syy} ${szlw1Szz} ${szhw1Szz} ${pBvol}" &
+                    append output/1-comp/macro.txt screen no title none
+#
+fix             checkOutput all print ${hstep} &
+                    "${ostep} ${aFmax} ${aFtol} ${aTmax} ${aTtol} ${aEkmax} ${aEktol}" &
+                    append output/1-comp/check.txt screen no title none
+#
+#visualization
+dump            dmpMesh all mesh/vtk ${hstep} output/1-comp/visualization/wall-*.vtp stress wear
+dump            dmp all custom/vtk ${hstep} output/1-comp/visualization/particle-*.vtp id type type &
+                   x y z ix iy iz vx vy vz fx fy fz omegax omegay omegaz radius
+#
+#thermodynamic output settings
+thermo_style    custom step v_oke v_eBvol v_pBvol v_velz v_vzMax v_sxhw1Sxx v_syhw1Syy v_szhw1Szz v_isEq
+thermo          ${hstep}
+thermo_modify   lost warn norm no
+###run
+run             0
+#
+print             "${ostep} ${oke} ${bvol} ${eBvol}&
+ ${sxlw17} ${sylw18} ${szlw19} ${sxhw17} ${syhw18} ${szhw19}&
+ ${sxlw1Sxx} ${sxhw1Sxx} ${sylw1Syy} ${syhw1Syy} ${szlw1Szz} ${szhw1Szz} ${pBvol}" & 
+    append output/1-comp/macro.txt screen no
+#
+print            "${ostep} ${aFmax} ${aFtol} ${aTmax} ${aTtol} ${aEkmax} ${aEktol}" &
+    append output/1-comp/check.txt screen no
+#
+change_box      all x final ${xlw07} ${xhw07} y final ${ylw08} ${yhw08} z final ${zlw09} ${zhw09}
+#
+run             ${totalStep}
+write_restart   restart/consol_1_10kPa.equil
+#

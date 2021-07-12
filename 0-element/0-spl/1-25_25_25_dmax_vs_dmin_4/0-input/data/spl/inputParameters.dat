@@ -1,0 +1,42 @@
+# Parameter for sample generation
+Note:
+-If iCompaction <>0 then before running rename sample.spl to InputSample.spl
+-If iConfig <>0 then before running rename config.spl to InputConfig.spl
+0											iGrading (Flag for type of particle size distribution; 0:CVD prescribed from an input file (default), 1:random in diamater, 2:CVD prescribed from conversion of a function to a table, 3:P=Ni/Npar prescribed)
+15625									Npar (Total number of particles; this is same as Nmin for iGrading=0)
+10 50									NClass (number of size classes), Nmin_pc (min number of particles per class)
+.00010	4.2 							Dmin (minimum diameter)	SizeRatio (Dmax/Dmin)		
+.0004		 							Dtopwall
+0											iBetaFn (Flag for sensitivity analysis using cumulative beta distribution; 0: no sensitivity (default); 1: sensitivity
+1 4.1 1 4.1						a_min,a_max,bmin,b_max for Beta function use in case of iBetaFunction=1
+BetaFnSensitivity.out	outputFile to write the BetaFn Sensitivity in it
+2.0 2.3										a and b parameters for the \beta function of prescribed analytical CVD curve (positive int)
+25	25								Nx (Number of particles along x)	Ny (along y) 
+0.1 									Gap (distance between particles lattice step = (1 + Gap)*Dmax) ; Gap>=0
+0.45									Gap_imperfection (imperfection of particles locations on the lattice = (2*RAND - 1)*Gap*Dmax*Gamp_imperfection); 0<=RAND<=1; 0<=Gamp_imperfection<=0.5 with default value of 0.5
+GradingCurveFile.dat	Grading curve - input file
+ClassGradingCurveFile.out				Class Grading curve - output file
+ClassSizeDistributionFile.out		Class Size distribution - output file
+SampleBoxSize.spl								Size of SampleBox - output file
+sample.spl						outputFile for sample
+sample.gran						outputFile for sample only with diameters
+config.spl						outputFile for config
+0											iWall (Flag for the top wall definition using particles; 0: no top wall def. (default), 1: top wall def.)
+0											iConfig (sample configuration); 0: for putting sample on a latice; 1: for reading config file (in this case Dmin will be ignored, and the dmax on top of Config file will be used together with the SizeRatio); 2: reading md_spl_000xxx.his and generate sample.spl (here Dmin and SizeRatio from the inputParameters.dat will be used)
+InputConfig.spl				Sample configuration for case of iconfig=1 - input file for particle positions
+md_spl_000061.his     Sample configuration for case of iconfig=2 - input file for particle positions
+# Parameters for Monte Carlo Compaction
+0											iCompaction (Flag for defining the Monte Carlo Compaction method; 0: not MC, 1: MC with elastic contacts, 2: MC with rigid contacts (works only with gravity), 3: MC with elastic contacts for wall-particle and rigid contact for particle-particle)
+0 										iTopWallControl(Flag to control the move of top wall) 0: Force control; 1: displacement control
+InputSample.spl				Sample to be compacted - input file
+0.1	0.01							Kd and KMao: MC Displacement Factor (x Dmin) and MC Max Allowed Overlap Factor (x Dmin)
+1.5	5000					  	DverFactor (x Dmin) and Nver for verlet list
+0.90       						ROverlap: number of overlaps divided by total number of trials (if higher than this, Kd to be reduced)
+1000000		1  					NMove & NStop: max number of trials before quitting the inner (# trials without halving Ld) and outer (# times halving Ld) loops
+15000									Nvtk: frequency for writing in vtk file from successful trials
+8 										kcv: Max z coordinate of the control volume, CV (x Dmin) for calculation packing fraction
+MCprogress.out				outputFile to write the MC progress in it
+3.	 						  		DperFactor (x Dmax) for periodic boundary
+50	1 								Nangle (max number of angles explored for each ipar in MC); Nrelax (number of relaxation loops for each iMove in MC)
+500		0.001						dphiCheckN (number of iMoves to calc dphi for termination); dphiCheckTol (min acceptable change of dphi per dphiCheckN iMoves)
+								

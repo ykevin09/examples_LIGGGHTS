@@ -1,0 +1,1 @@
+gmsh -2 plane.geo -o plane.stl -format stl
