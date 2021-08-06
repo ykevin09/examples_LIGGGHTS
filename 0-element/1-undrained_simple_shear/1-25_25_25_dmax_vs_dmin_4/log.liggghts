@@ -1,0 +1,565 @@
+LIGGGHTS (Version LIGGGHTS-PUBLIC 3.8.0, compiled 2021-06-23-22:11:57 by myang, git commit 02e57dada9389e77740130377f63f49af31bad80)
+#********************************************************************************#
+# @Author : Ming Yang
+# @Email  : ykevin09@gmail.com
+# @Date   : 2021-02-19
+# @Last Modified by     : Ming Yang
+# @Lost Modified Time   : 2021-05-18
+# @Function  : Undrained simple shear in bi-periodic cell via velocity control
+#   1. Atoms divided into three groups: topLayer, midGroup, botLayer; probReg created
+# for homogenization analysis (stress);
+#   2. Shear is induced by topLayer gluded to top mesh-plate;
+#   3. Can be monotonic or cyclic
+# @Reference :
+#********************************************************************************#
+###Initialization
+#preliminaries
+units           si
+atom_style      granular
+atom_modify     map array
+boundary        p p m
+newton          off
+communicate     single vel yes
+#declare computation domain
+read_restart    restart/consol_3_100kPa.equil
+  orthogonal box = (-0.000264314 -0.000264314 -0.000278) to (0.0119643 0.0119643 0.011978)
+  1 by 1 by 2 MPI processor grid
+  15625 atoms
+#neighbor listing
+neighbor        0.0001 bin
+neigh_modify    delay 0 #every 100
+
+###Setup
+#material and interaction properties required
+variable 	    atomEY equal 7.0e10 #1GP=1e9Pa
+variable 	    atomPO equal 0.25
+variable 	    atomCOR equal 0.8
+variable        atomCOF equal 0.5
+variable        atomWallCOF equal 0.0
+variable        atomCORF equal 0.1
+variable        atomWallCORF equal 0.0
+variable        atomCORVD equal 0.13
+variable 	    atomRS equal 2.25
+hard_particles  yes
+fix             mEY all property/global youngsModulus peratomtype ${atomEY} ${atomEY}
+fix             mEY all property/global youngsModulus peratomtype 70000000000 ${atomEY}
+fix             mEY all property/global youngsModulus peratomtype 70000000000 70000000000
+fix             mPO all property/global poissonsRatio peratomtype ${atomPO} ${atomPO}
+fix             mPO all property/global poissonsRatio peratomtype 0.25 ${atomPO}
+fix             mPO all property/global poissonsRatio peratomtype 0.25 0.25
+fix             mCOR all property/global coefficientRestitution peratomtypepair 2 ${atomCOR} ${atomCOR} ${atomCOR} ${atomCOR}
+fix             mCOR all property/global coefficientRestitution peratomtypepair 2 0.8 ${atomCOR} ${atomCOR} ${atomCOR}
+fix             mCOR all property/global coefficientRestitution peratomtypepair 2 0.8 0.8 ${atomCOR} ${atomCOR}
+fix             mCOR all property/global coefficientRestitution peratomtypepair 2 0.8 0.8 0.8 ${atomCOR}
+fix             mCOR all property/global coefficientRestitution peratomtypepair 2 0.8 0.8 0.8 0.8
+fix             mCOF all property/global coefficientFriction peratomtypepair 2 ${atomCOF} ${atomWallCOF} ${atomWallCOF} ${atomWallCOF}
+fix             mCOF all property/global coefficientFriction peratomtypepair 2 0.5 ${atomWallCOF} ${atomWallCOF} ${atomWallCOF}
+fix             mCOF all property/global coefficientFriction peratomtypepair 2 0.5 0 ${atomWallCOF} ${atomWallCOF}
+fix             mCOF all property/global coefficientFriction peratomtypepair 2 0.5 0 0 ${atomWallCOF}
+fix             mCOF all property/global coefficientFriction peratomtypepair 2 0.5 0 0 0
+fix             mCORF all property/global coefficientRollingFriction peratomtypepair 2 ${atomCORF} ${atomWallCORF} ${atomWallCORF} ${atomWallCORF}
+fix             mCORF all property/global coefficientRollingFriction peratomtypepair 2 0.1 ${atomWallCORF} ${atomWallCORF} ${atomWallCORF}
+fix             mCORF all property/global coefficientRollingFriction peratomtypepair 2 0.1 0 ${atomWallCORF} ${atomWallCORF}
+fix             mCORF all property/global coefficientRollingFriction peratomtypepair 2 0.1 0 0 ${atomWallCORF}
+fix             mCORF all property/global coefficientRollingFriction peratomtypepair 2 0.1 0 0 0
+fix             mCORVD all property/global coefficientRollingViscousDamping peratomtypepair 2 ${atomCORVD} ${atomCORVD} ${atomCORVD} ${atomCORVD}
+fix             mCORVD all property/global coefficientRollingViscousDamping peratomtypepair 2 0.13 ${atomCORVD} ${atomCORVD} ${atomCORVD}
+fix             mCORVD all property/global coefficientRollingViscousDamping peratomtypepair 2 0.13 0.13 ${atomCORVD} ${atomCORVD}
+fix             mCORVD all property/global coefficientRollingViscousDamping peratomtypepair 2 0.13 0.13 0.13 ${atomCORVD}
+fix             mCORVD all property/global coefficientRollingViscousDamping peratomtypepair 2 0.13 0.13 0.13 0.13
+fix             mRS all property/global rollingStiffness scalar ${atomRS}
+fix             mRS all property/global rollingStiffness scalar 2.25
+#
+#initial positions of servo walls: recovering top & bottom mesh plates
+variable        xl0 equal -0.00024
+variable        yl0 equal -0.00024
+variable        zl0 equal -0.00024
+variable        xh0 equal 0.01132
+variable        yh0 equal 0.01132
+variable        zh0 equal 0.01132
+variable        xa0 equal 0.5*(${xl0}+${xh0})
+variable        xa0 equal 0.5*(-0.00024+${xh0})
+variable        xa0 equal 0.5*(-0.00024+0.01132)
+variable        ya0 equal 0.5*(${yl0}+${yh0})
+variable        ya0 equal 0.5*(-0.00024+${yh0})
+variable        ya0 equal 0.5*(-0.00024+0.01132)
+variable        za0 equal 0.5*(${zl0}+${zh0})
+variable        za0 equal 0.5*(-0.00024+${zh0})
+variable        za0 equal 0.5*(-0.00024+0.01132)
+variable        mslx0 equal ${xh0}-${xl0}
+variable        mslx0 equal 0.01132-${xl0}
+variable        mslx0 equal 0.01132--0.00024
+variable        msly0 equal ${yh0}-${yl0}
+variable        msly0 equal 0.01132-${yl0}
+variable        msly0 equal 0.01132--0.00024
+variable        mslz0 equal ${zh0}-${zl0}
+variable        mslz0 equal 0.01132-${zl0}
+variable        mslz0 equal 0.01132--0.00024
+#
+variable        servoForce equal 0.001
+variable        servoVmax equal 0.2
+variable        servoKp equal 0.05
+variable        servoKi equal 0.0
+variable        servoKd equal 0.0
+variable        servoRatio equal 0.01
+variable        servoScale equal 1.0
+#
+fix             szlwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale ${servoScale}                     move ${xa0} ${ya0} ${zl0} com ${xa0} ${ya0} ${zl0} ctrlPV force axis 0 0 +1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szlwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move ${xa0} ${ya0} ${zl0} com ${xa0} ${ya0} ${zl0} ctrlPV force axis 0 0 +1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szlwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 ${ya0} ${zl0} com ${xa0} ${ya0} ${zl0} ctrlPV force axis 0 0 +1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szlwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 ${zl0} com ${xa0} ${ya0} ${zl0} ctrlPV force axis 0 0 +1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szlwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 -0.00024 com ${xa0} ${ya0} ${zl0} ctrlPV force axis 0 0 +1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szlwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 -0.00024 com 0.00554 ${ya0} ${zl0} ctrlPV force axis 0 0 +1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szlwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 -0.00024 com 0.00554 0.00554 ${zl0} ctrlPV force axis 0 0 +1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szlwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 -0.00024 com 0.00554 0.00554 -0.00024 ctrlPV force axis 0 0 +1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szlwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 -0.00024 com 0.00554 0.00554 -0.00024 ctrlPV force axis 0 0 +1                     target_val 0.001 vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szlwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 -0.00024 com 0.00554 0.00554 -0.00024 ctrlPV force axis 0 0 +1                     target_val 0.001 vel_max 0.2 kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szlwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 -0.00024 com 0.00554 0.00554 -0.00024 ctrlPV force axis 0 0 +1                     target_val 0.001 vel_max 0.2 kp 0.05 ki ${servoKi} kd ${servoKd}
+fix             szlwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 -0.00024 com 0.00554 0.00554 -0.00024 ctrlPV force axis 0 0 +1                     target_val 0.001 vel_max 0.2 kp 0.05 ki 0 kd ${servoKd}
+fix             szlwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 -0.00024 com 0.00554 0.00554 -0.00024 ctrlPV force axis 0 0 +1                     target_val 0.001 vel_max 0.2 kp 0.05 ki 0 kd 0
+INFO: mesh file (input/mesh/plane.stl) is required, but data will be taken from restart file (../fix_mesh.cpp:417)
+Resetting global state of Fix szlwall2 Style mesh/surface/stress/servo from restart file info
+fix             szhwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale ${servoScale}                     move ${xa0} ${ya0} ${zh0} com ${xa0} ${ya0} ${zh0} ctrlPV force axis 0 0 -1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szhwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move ${xa0} ${ya0} ${zh0} com ${xa0} ${ya0} ${zh0} ctrlPV force axis 0 0 -1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szhwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 ${ya0} ${zh0} com ${xa0} ${ya0} ${zh0} ctrlPV force axis 0 0 -1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szhwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 ${zh0} com ${xa0} ${ya0} ${zh0} ctrlPV force axis 0 0 -1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szhwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 0.01132 com ${xa0} ${ya0} ${zh0} ctrlPV force axis 0 0 -1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szhwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 0.01132 com 0.00554 ${ya0} ${zh0} ctrlPV force axis 0 0 -1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szhwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 0.01132 com 0.00554 0.00554 ${zh0} ctrlPV force axis 0 0 -1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szhwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 0.01132 com 0.00554 0.00554 0.01132 ctrlPV force axis 0 0 -1                     target_val ${servoForce} vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szhwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 0.01132 com 0.00554 0.00554 0.01132 ctrlPV force axis 0 0 -1                     target_val 0.001 vel_max ${servoVmax} kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szhwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 0.01132 com 0.00554 0.00554 0.01132 ctrlPV force axis 0 0 -1                     target_val 0.001 vel_max 0.2 kp ${servoKp} ki ${servoKi} kd ${servoKd}
+fix             szhwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 0.01132 com 0.00554 0.00554 0.01132 ctrlPV force axis 0 0 -1                     target_val 0.001 vel_max 0.2 kp 0.05 ki ${servoKi} kd ${servoKd}
+fix             szhwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 0.01132 com 0.00554 0.00554 0.01132 ctrlPV force axis 0 0 -1                     target_val 0.001 vel_max 0.2 kp 0.05 ki 0 kd ${servoKd}
+fix             szhwall2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale 1                     move 0.00554 0.00554 0.01132 com 0.00554 0.00554 0.01132 ctrlPV force axis 0 0 -1                     target_val 0.001 vel_max 0.2 kp 0.05 ki 0 kd 0
+INFO: mesh file (input/mesh/plane.stl) is required, but data will be taken from restart file (../fix_mesh.cpp:417)
+Resetting global state of Fix szhwall2 Style mesh/surface/stress/servo from restart file info
+fix             swalls2 all wall/gran model hertz tangential no_history mesh n_meshes 2                     meshes szlwall2 szhwall2
+Resetting global state of Fix n_neighs_mesh_szlwall2 Style property/atom from restart file info
+Resetting per-atom state of Fix n_neighs_mesh_szlwall2 Style property/atom from restart file info
+Resetting global state of Fix tracker_szlwall2 Style contacthistory/mesh from restart file info
+Resetting per-atom state of Fix tracker_szlwall2 Style contacthistory/mesh from restart file info
+Resetting global state of Fix n_neighs_mesh_szhwall2 Style property/atom from restart file info
+Resetting per-atom state of Fix n_neighs_mesh_szhwall2 Style property/atom from restart file info
+Resetting global state of Fix tracker_szhwall2 Style contacthistory/mesh from restart file info
+Resetting per-atom state of Fix tracker_szhwall2 Style contacthistory/mesh from restart file info
+#
+variable        tmp equal f_szlwall2[9]
+variable        zl3 equal ${tmp}
+variable        zl3 equal -0.000274000060006313
+variable        tmp equal f_szhwall2[9]
+variable        zh3 equal ${tmp}
+variable        zh3 equal 0.0119740000601039
+#
+unfix           swalls2
+unfix           szlwall2
+unfix           szhwall2
+#
+variable        xa3 equal 0.5*(xlo+xhi)
+variable        ya3 equal 0.5*(ylo+yhi)
+variable        mslx3 equal lx
+variable        msly3 equal ly
+variable        msl3 equal (${mslx3}>=${msly3})*${mslx3}+(${mslx3}<${msly3})*${msly3}
+variable        msl3 equal (0.0122286270495488>=${msly3})*${mslx3}+(${mslx3}<${msly3})*${msly3}
+variable        msl3 equal (0.0122286270495488>=0.0122286270495488)*${mslx3}+(${mslx3}<${msly3})*${msly3}
+variable        msl3 equal (0.0122286270495488>=0.0122286270495488)*0.0122286270495488+(${mslx3}<${msly3})*${msly3}
+variable        msl3 equal (0.0122286270495488>=0.0122286270495488)*0.0122286270495488+(0.0122286270495488<${msly3})*${msly3}
+variable        msl3 equal (0.0122286270495488>=0.0122286270495488)*0.0122286270495488+(0.0122286270495488<0.0122286270495488)*${msly3}
+variable        msl3 equal (0.0122286270495488>=0.0122286270495488)*0.0122286270495488+(0.0122286270495488<0.0122286270495488)*0.0122286270495488
+variable        SCALE3 equal 0.99*${msl3}/${mslz0}
+variable        SCALE3 equal 0.99*0.0122286270495488/${mslz0}
+variable        SCALE3 equal 0.99*0.0122286270495488/0.01156
+#
+fix             zlwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE3}                     move ${xa3} ${ya3} ${zl3} reference_point ${xa3} ${ya3} ${zl3}
+fix             zlwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move ${xa3} ${ya3} ${zl3} reference_point ${xa3} ${ya3} ${zl3}
+fix             zlwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move 0.0058500000000434 ${ya3} ${zl3} reference_point ${xa3} ${ya3} ${zl3}
+fix             zlwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move 0.0058500000000434 0.0058500000000434 ${zl3} reference_point ${xa3} ${ya3} ${zl3}
+fix             zlwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move 0.0058500000000434 0.0058500000000434 -0.000274000060006313 reference_point ${xa3} ${ya3} ${zl3}
+fix             zlwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move 0.0058500000000434 0.0058500000000434 -0.000274000060006313 reference_point 0.0058500000000434 ${ya3} ${zl3}
+fix             zlwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move 0.0058500000000434 0.0058500000000434 -0.000274000060006313 reference_point 0.0058500000000434 0.0058500000000434 ${zl3}
+fix             zlwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move 0.0058500000000434 0.0058500000000434 -0.000274000060006313 reference_point 0.0058500000000434 0.0058500000000434 -0.000274000060006313
+WARNING: Mesh for fix mesh/surface/stress has been scaled, moved, or rotated.
+Please note that values for 'reference_point' refer to the scaled, moved, or rotated configuration (../mesh_module_stress.cpp:104)
+fix             zhwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE3}                     move ${xa3} ${ya3} ${zh3} reference_point ${xa3} ${ya3} ${zh3}
+fix             zhwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move ${xa3} ${ya3} ${zh3} reference_point ${xa3} ${ya3} ${zh3}
+fix             zhwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move 0.0058500000000434 ${ya3} ${zh3} reference_point ${xa3} ${ya3} ${zh3}
+fix             zhwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move 0.0058500000000434 0.0058500000000434 ${zh3} reference_point ${xa3} ${ya3} ${zh3}
+fix             zhwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move 0.0058500000000434 0.0058500000000434 0.0119740000601039 reference_point ${xa3} ${ya3} ${zh3}
+fix             zhwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move 0.0058500000000434 0.0058500000000434 0.0119740000601039 reference_point 0.0058500000000434 ${ya3} ${zh3}
+fix             zhwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move 0.0058500000000434 0.0058500000000434 0.0119740000601039 reference_point 0.0058500000000434 0.0058500000000434 ${zh3}
+fix             zhwall3 all mesh/surface/stress file input/mesh/plane.stl type 2 scale 1.0472613130669                     move 0.0058500000000434 0.0058500000000434 0.0119740000601039 reference_point 0.0058500000000434 0.0058500000000434 0.0119740000601039
+WARNING: Mesh for fix mesh/surface/stress has been scaled, moved, or rotated.
+Please note that values for 'reference_point' refer to the scaled, moved, or rotated configuration (../mesh_module_stress.cpp:104)
+fix             walls3 all wall/gran model hertz tangential history mesh n_meshes 2                     meshes zlwall3 zhwall3
+#
+variable        tmp equal f_zlwall3[9]
+variable        zl0w39 equal ${tmp}
+variable        zl0w39 equal -0.000274000060006313
+variable        tmp equal f_zhwall3[7]
+variable        xh0w37 equal ${tmp}
+variable        xh0w37 equal 0.0058500000000434
+variable        tmp equal f_zhwall3[8]
+variable        yh0w38 equal ${tmp}
+variable        yh0w38 equal 0.0058500000000434
+variable        zhw39 equal f_zhwall3[9]
+variable        zh0w39 equal ${zhw39}
+variable        zh0w39 equal 0.0119740000601039
+variable        bvol equal lx*ly*(v_zh0w39-v_zl0w39) #Sample volume
+#
+#define the physics
+pair_style      gran model hertz tangential history rolling_friction epsd3                    limitForce on torsionTorque on
+pair_coeff      * *
+#
+variable        xl equal xlo
+variable        xh equal xhi
+variable        yl equal ylo
+variable        yh equal yhi
+variable        conRatio equal 0.05
+variable        zTop equal (${zh0w39}-${conRatio}*(${zh0w39}-${zl0w39}))
+variable        zTop equal (0.0119740000601039-${conRatio}*(${zh0w39}-${zl0w39}))
+variable        zTop equal (0.0119740000601039-0.05*(${zh0w39}-${zl0w39}))
+variable        zTop equal (0.0119740000601039-0.05*(0.0119740000601039-${zl0w39}))
+variable        zTop equal (0.0119740000601039-0.05*(0.0119740000601039--0.000274000060006313))
+region          regTop block ${xl} ${xh} ${yl} ${yh} ${zTop} ${zh0w39}
+region          regTop block -0.000264313524730995 ${xh} ${yl} ${yh} ${zTop} ${zh0w39}
+region          regTop block -0.000264313524730995 0.0119643135248178 ${yl} ${yh} ${zTop} ${zh0w39}
+region          regTop block -0.000264313524730995 0.0119643135248178 -0.000264313524730995 ${yh} ${zTop} ${zh0w39}
+region          regTop block -0.000264313524730995 0.0119643135248178 -0.000264313524730995 0.0119643135248178 ${zTop} ${zh0w39}
+region          regTop block -0.000264313524730995 0.0119643135248178 -0.000264313524730995 0.0119643135248178 0.0113616000540984 ${zh0w39}
+region          regTop block -0.000264313524730995 0.0119643135248178 -0.000264313524730995 0.0119643135248178 0.0113616000540984 0.0119740000601039
+group           topLayer region regTop
+625 atoms in group topLayer
+variable        zBot equal (${zl0w39}+${conRatio}*(${zh0w39}-${zl0w39}))
+variable        zBot equal (-0.000274000060006313+${conRatio}*(${zh0w39}-${zl0w39}))
+variable        zBot equal (-0.000274000060006313+0.05*(${zh0w39}-${zl0w39}))
+variable        zBot equal (-0.000274000060006313+0.05*(0.0119740000601039-${zl0w39}))
+variable        zBot equal (-0.000274000060006313+0.05*(0.0119740000601039--0.000274000060006313))
+region          regBot block ${xl} ${xh} ${yl} ${yh} ${zl0w39} ${zBot}
+region          regBot block -0.000264313524730995 ${xh} ${yl} ${yh} ${zl0w39} ${zBot}
+region          regBot block -0.000264313524730995 0.0119643135248178 ${yl} ${yh} ${zl0w39} ${zBot}
+region          regBot block -0.000264313524730995 0.0119643135248178 -0.000264313524730995 ${yh} ${zl0w39} ${zBot}
+region          regBot block -0.000264313524730995 0.0119643135248178 -0.000264313524730995 0.0119643135248178 ${zl0w39} ${zBot}
+region          regBot block -0.000264313524730995 0.0119643135248178 -0.000264313524730995 0.0119643135248178 -0.000274000060006313 ${zBot}
+region          regBot block -0.000264313524730995 0.0119643135248178 -0.000264313524730995 0.0119643135248178 -0.000274000060006313 0.000338399945999198
+group           botLayer region regBot
+625 atoms in group botLayer
+group           atomAll type 1
+15625 atoms in group atomAll
+group           midGroup subtract atomAll topLayer botLayer
+14375 atoms in group midGroup
+#probReg
+variable        probRatio equal 0.075
+variable        probZt equal (${zh0w39}-${probRatio}*(${zh0w39}-${zl0w39}))
+variable        probZt equal (0.0119740000601039-${probRatio}*(${zh0w39}-${zl0w39}))
+variable        probZt equal (0.0119740000601039-0.075*(${zh0w39}-${zl0w39}))
+variable        probZt equal (0.0119740000601039-0.075*(0.0119740000601039-${zl0w39}))
+variable        probZt equal (0.0119740000601039-0.075*(0.0119740000601039--0.000274000060006313))
+variable        probZb equal (${zl0w39}+${probRatio}*(${zh0w39}-${zl0w39}))
+variable        probZb equal (-0.000274000060006313+${probRatio}*(${zh0w39}-${zl0w39}))
+variable        probZb equal (-0.000274000060006313+0.075*(${zh0w39}-${zl0w39}))
+variable        probZb equal (-0.000274000060006313+0.075*(0.0119740000601039-${zl0w39}))
+variable        probZb equal (-0.000274000060006313+0.075*(0.0119740000601039--0.000274000060006313))
+#
+###Detailed settings
+#integrator
+fix             integr midGroup nve/sphere
+#timestep
+timestep        2.0e-9
+fix             ctg all check/timestep/gran 1000 0.05 0.05
+###Execution and further settings
+variable        hstep equal 10000
+variable        rstep equal 1000*${hstep}
+variable        rstep equal 1000*10000
+#atom property and stress
+compute         atomProp all property/atom mass diameter z vx vy vz fx fy fz tqx tqy tqz
+compute         atomDmin all reduce min c_atomProp[2]
+variable        aDmin equal c_atomDmin
+variable        atomV atom c_atomProp[4]^2+c_atomProp[5]^2+c_atomProp[6]^2
+compute         atomVmax all reduce max v_atomV
+variable        aVmax equal sqrt(c_atomVmax)
+variable        atomF atom c_atomProp[7]^2+c_atomProp[8]^2+c_atomProp[9]^2
+compute         atomFmax all reduce max v_atomF
+variable        aFmax equal sqrt(c_atomFmax)
+variable        atomT atom c_atomProp[10]^2+c_atomProp[11]^2+c_atomProp[12]^2
+compute         atomTmax all reduce max v_atomT
+variable        aTmax equal sqrt(c_atomTmax)
+variable        atomEk atom 0.5*c_atomProp[1]*(c_atomProp[4]^2+c_atomProp[5]^2+c_atomProp[6]^2)
+compute         atomEkmax all reduce max v_atomEk
+variable        aEkmax equal c_atomEkmax
+#
+#homogenization based on the whole volume
+compute         atomStress all stress/atom virial
+compute         bvolStress all reduce sum c_atomStress[1] c_atomStress[2] c_atomStress[3]                                          c_atomStress[4] c_atomStress[5] c_atomStress[6]
+variable        pBvol equal -(c_bvolStress[1]+c_bvolStress[2]+c_bvolStress[3])/3/v_bvol
+variable        sxxBvol equal -(c_bvolStress[1])/v_bvol
+variable        syyBvol equal -(c_bvolStress[2])/v_bvol
+variable        szzBvol equal -(c_bvolStress[3])/v_bvol
+variable        sxyBvol equal (c_bvolStress[4])/v_bvol
+variable        sxzBvol equal (c_bvolStress[5])/v_bvol
+variable        syzBvol equal (c_bvolStress[6])/v_bvol
+variable        volMass equal mass(atomAll)/2650.0
+variable        eBvol equal (v_bvol-v_volMass)/v_volMass
+#
+#homogenization based on probReg: (false: 0 true: 1)
+variable        probVol equal lx*ly*(v_probZt-v_probZb) #probReg volume
+variable        conPi equal 4*PI/3
+variable        atomR atom 0.5*c_atomProp[2]
+variable        atomProbTop atom (c_atomProp[3]+v_atomR-v_probZt)
+variable        atomProbBot atom (v_probZb-c_atomProp[3]+v_atomR)
+variable        atomIsIn atom (v_atomProbTop<=0)&&(v_atomProbBot<=0)
+variable        atomIsCrossTop atom (v_atomProbTop>0)&&(c_atomProp[3]-v_atomR-v_probZt<0)
+variable        atomIsCrossBot atom (v_atomProbBot>0)&&(v_probZb-c_atomProp[3]-v_atomR<0)
+variable        atomIsNot atom (c_atomProp[3]-v_atomR-v_probZt>=0)||(v_probZb-c_atomProp[3]-v_atomR>=0)
+variable        atomProbVol atom v_conPi*v_atomIsIn*(v_atomR^3)+v_conPi*v_atomIsCrossTop*(v_atomR^3-1/4*v_atomProbTop^2*(3*v_atomR-v_atomProbTop))+v_conPi*v_atomIsCrossBot*(v_atomR^3-1/4*v_atomProbBot^2*(3*v_atomR-v_atomProbBot))+v_conPi*v_atomIsNot*0
+variable        atomVol atom v_conPi*v_atomR*v_atomR*v_atomR
+variable        atomProbSxx atom v_atomProbVol/v_atomVol*c_atomStress[1]
+variable        atomProbSyy atom v_atomProbVol/v_atomVol*c_atomStress[2]
+variable        atomProbSzz atom v_atomProbVol/v_atomVol*c_atomStress[3]
+variable        atomProbSxy atom v_atomProbVol/v_atomVol*c_atomStress[4]
+variable        atomProbSxz atom v_atomProbVol/v_atomVol*c_atomStress[5]
+variable        atomProbSyz atom v_atomProbVol/v_atomVol*c_atomStress[6]
+compute         probStress all reduce sum v_atomProbSxx v_atomProbSyy v_atomProbSzz                                          v_atomProbSxy v_atomProbSxz v_atomProbSyz
+variable        pProb equal -(c_probStress[1]+c_probStress[2]+c_probStress[3])/3/v_probVol
+variable        sxxProb equal -(c_probStress[1])/v_probVol
+variable        syyProb equal -(c_probStress[2])/v_probVol
+variable        szzProb equal -(c_probStress[3])/v_probVol
+variable        sxyProb equal (c_probStress[4])/v_probVol
+variable        sxzProb equal (c_probStress[5])/v_probVol
+variable        syzProb equal (c_probStress[6])/v_probVol
+compute         solidProbVol all reduce sum v_atomProbVol
+variable        eProb equal (v_probVol-c_solidProbVol)/c_solidProbVol
+#
+#
+compute         eng all ke
+variable        oke equal c_eng
+#
+compute         topLayerVel topLayer reduce ave c_atomProp[4] c_atomProp[5] c_atomProp[6]
+variable        topLayerVx equal c_topLayerVel[1]
+#---- microscopic study ----
+#coordination number (probReg, no volume-weighted)
+compute         atomCN all contact/atom
+variable        atomProbCN atom c_atomCN #c_atomCN*v_atomProbVol/v_atomVol # for N_c
+variable        atomInProb atom (1-v_atomIsNot) #v_atomProbVol/v_atomVol # for N_p
+variable        atomInProbCN0 atom (1-v_atomIsNot)*(v_atomProbCN==0) # for N_p^0
+variable        atomInProbCN1 atom (1-v_atomIsNot)*(v_atomProbCN==1) # for N_p^1
+variable        atomInProbCN2 atom (1-v_atomIsNot)*(v_atomProbCN==2) # for N_p^2
+variable        atomInProbCN3 atom (1-v_atomIsNot)*(v_atomProbCN==3) # for N_p^3
+variable        atomInProbCN4 atom (1-v_atomIsNot)*(v_atomProbCN==4) # for N_p^4
+variable        atomInProbCN5 atom (1-v_atomIsNot)*(v_atomProbCN==5) # for N_p^5
+variable        atomInProbCN6 atom (1-v_atomIsNot)*(v_atomProbCN==6) # for N_p^6
+variable        atomInProbCN7 atom (1-v_atomIsNot)*(v_atomProbCN==7) # for N_p^7
+variable        atomInProbCN8 atom (1-v_atomIsNot)*(v_atomProbCN==8) # for N_p^8
+variable        atomInProbCN9 atom (1-v_atomIsNot)*(v_atomProbCN==9) # for N_p^9
+variable        atomInProbCN10 atom (1-v_atomIsNot)*(v_atomProbCN==10) # for N_p^10
+variable        atomInProbCN11 atom (1-v_atomIsNot)*(v_atomProbCN==11) # for N_p^11
+variable        atomInProbCN12 atom (1-v_atomIsNot)*(v_atomProbCN==12) # for N_p^12
+variable        atomInProbCN13 atom (1-v_atomIsNot)*(v_atomProbCN==13) # for N_p^13
+variable        atomInProbCN14 atom (1-v_atomIsNot)*(v_atomProbCN==14) # for N_p^14
+variable        atomInProbCN15 atom (1-v_atomIsNot)*(v_atomProbCN==15) # for N_p^15
+variable        atomInProbCN16 atom (1-v_atomIsNot)*(v_atomProbCN==16) # for N_p^16
+##(in case of volume-weighted computes)
+# variable        atomInProbCN0 atom (1-v_atomIsNot)*(v_atomProbCN<=0) # for N_p^0
+# variable        atomInProbCN1 atom (1-v_atomIsNot)*(v_atomProbCN<=1)*(v_atomProbCN>0) # for N_p^1
+# variable        atomInProbCN2 atom (1-v_atomIsNot)*(v_atomProbCN<=2)*(v_atomProbCN>1) # for N_p^2
+# variable        atomInProbCN3 atom (1-v_atomIsNot)*(v_atomProbCN<=3)*(v_atomProbCN>2) # for N_p^3
+# variable        atomInProbCN4 atom (1-v_atomIsNot)*(v_atomProbCN<=4)*(v_atomProbCN>3) # for N_p^4
+# variable        atomInProbCN5 atom (1-v_atomIsNot)*(v_atomProbCN<=5)*(v_atomProbCN>4) # for N_p^5
+# variable        atomInProbCN6 atom (1-v_atomIsNot)*(v_atomProbCN<=6)*(v_atomProbCN>5) # for N_p^6
+# variable        atomInProbCN7 atom (1-v_atomIsNot)*(v_atomProbCN<=7)*(v_atomProbCN>6) # for N_p^7
+# variable        atomInProbCN8 atom (1-v_atomIsNot)*(v_atomProbCN<=8)*(v_atomProbCN>7) # for N_p^8
+# variable        atomInProbCN9 atom (1-v_atomIsNot)*(v_atomProbCN<=9)*(v_atomProbCN>8) # for N_p^9
+# variable        atomInProbCN10 atom (1-v_atomIsNot)*(v_atomProbCN<=10)*(v_atomProbCN>9) # for N_p^10
+# variable        atomInProbCN11 atom (1-v_atomIsNot)*(v_atomProbCN<=11)*(v_atomProbCN>10) # for N_p^11
+# variable        atomInProbCN12 atom (1-v_atomIsNot)*(v_atomProbCN<=12)*(v_atomProbCN>11) # for N_p^12
+# variable        atomInProbCN13 atom (1-v_atomIsNot)*(v_atomProbCN<=13)*(v_atomProbCN>12) # for N_p^13
+# variable        atomInProbCN14 atom (1-v_atomIsNot)*(v_atomProbCN<=14)*(v_atomProbCN>13) # for N_p^14
+# variable        atomInProbCN15 atom (1-v_atomIsNot)*(v_atomProbCN<=15)*(v_atomProbCN>14) # for N_p^15
+# variable        atomInProbCN16 atom (1-v_atomIsNot)*(v_atomProbCN<=16)*(v_atomProbCN>15) # for N_p^16
+compute         tmpCN all reduce sum v_atomProbCN v_atomInProb                                     v_atomInProbCN0 v_atomInProbCN1 v_atomInProbCN2 v_atomInProbCN3                                     v_atomInProbCN4 v_atomInProbCN5 v_atomInProbCN6 v_atomInProbCN7                                     v_atomInProbCN8 v_atomInProbCN9 v_atomInProbCN10 v_atomInProbCN11                                     v_atomInProbCN12 v_atomInProbCN13 v_atomInProbCN14 v_atomInProbCN15                                     v_atomInProbCN16
+variable        Nc equal c_tmpCN[1]
+variable        Np equal c_tmpCN[2]
+variable        Np0 equal c_tmpCN[3]
+variable        Np1 equal c_tmpCN[4]
+variable        Np2 equal c_tmpCN[5]
+variable        Np3 equal c_tmpCN[6]
+variable        Np4 equal c_tmpCN[7]
+variable        Np5 equal c_tmpCN[8]
+variable        Np6 equal c_tmpCN[9]
+variable        Np7 equal c_tmpCN[10]
+variable        Np8 equal c_tmpCN[11]
+variable        Np9 equal c_tmpCN[12]
+variable        Np10 equal c_tmpCN[13]
+variable        Np11 equal c_tmpCN[14]
+variable        Np12 equal c_tmpCN[15]
+variable        Np13 equal c_tmpCN[16]
+variable        Np14 equal c_tmpCN[17]
+variable        Np15 equal c_tmpCN[18]
+variable        Np16 equal c_tmpCN[19]
+variable        CNa equal v_Nc/(v_Np+1e-6)
+variable        CNg equal v_Nc/(v_Np-v_Np0+1e-6)
+variable        CNm equal (v_Nc-v_Np1)/(v_Np-v_Np0-v_Np1+1e-6)
+#
+#fabric anisotropy: ac an at (contact-based)
+# compute         tmpAAProp property/local
+# compute         tmpAA pair/gran/local id force_normal
+# compute         reduce sum
+#
+#fabric anisotropy: ac an at (atom-based)
+#
+#fabric anisotropy
+#
+#particle-particle and particle-wall contact info
+#compute         pp all pair/gran/local pos id force force_normal force_tangential delta
+#compute         pw all wall/gran/local pos id force force_normal force_tangential delta
+#history
+#dump            dpp all local ${hstep} output/4-shear/contact/ppcontact-*.dat #                    c_pp[1] c_pp[2] c_pp[3] #                    c_pp[4] c_pp[5] c_pp[6] c_pp[7] c_pp[8] c_pp[9] #                    c_pp[10] c_pp[11] c_pp[12] #                    c_pp[13] c_pp[14] c_pp[15] #                    c_pp[16] c_pp[17] c_pp[18] #                    c_pp[19]
+#dump            dpw all local ${hstep} output/4-shear/contact/pwcontact-*.dat #                    c_pw[1] c_pw[2] c_pw[3] #                    c_pw[4] c_pw[5] c_pw[6] c_pw[7] c_pw[8] c_pw[9] #                    c_pw[10] c_pw[11] c_pw[12] #                    c_pw[13] c_pw[14] c_pw[15] #                    c_pw[16] c_pw[17] c_pw[18] #                    c_pw[19]
+#
+#state
+variable        ostep equal step
+#
+variable        zhw3Sxz equal f_zhwall3[1]/(lx*ly)
+variable        zhw3Syz equal f_zhwall3[2]/(lx*ly)
+variable        zhw3Szz equal f_zhwall3[3]/(lx*ly)
+variable        zlw3Sxz equal f_zlwall3[1]/(lx*ly)
+variable        zlw3Syz equal f_zlwall3[2]/(lx*ly)
+variable        zlw3Szz equal f_zlwall3[3]/(lx*ly)
+variable        gxz equal (f_zhwall3[7]-${xh0w37})/(${zh0w39}-${zl0w39})/(1-2*${conRatio})
+variable        gxz equal (f_zhwall3[7]-0.0058500000000434)/(${zh0w39}-${zl0w39})/(1-2*${conRatio})
+variable        gxz equal (f_zhwall3[7]-0.0058500000000434)/(0.0119740000601039-${zl0w39})/(1-2*${conRatio})
+variable        gxz equal (f_zhwall3[7]-0.0058500000000434)/(0.0119740000601039--0.000274000060006313)/(1-2*${conRatio})
+variable        gxz equal (f_zhwall3[7]-0.0058500000000434)/(0.0119740000601039--0.000274000060006313)/(1-2*0.05)
+variable        gyz equal (f_zhwall3[8]-${yh0w38})/(${zh0w39}-${zl0w39})/(1-2*${conRatio})
+variable        gyz equal (f_zhwall3[8]-0.0058500000000434)/(${zh0w39}-${zl0w39})/(1-2*${conRatio})
+variable        gyz equal (f_zhwall3[8]-0.0058500000000434)/(0.0119740000601039-${zl0w39})/(1-2*${conRatio})
+variable        gyz equal (f_zhwall3[8]-0.0058500000000434)/(0.0119740000601039--0.000274000060006313)/(1-2*${conRatio})
+variable        gyz equal (f_zhwall3[8]-0.0058500000000434)/(0.0119740000601039--0.000274000060006313)/(1-2*0.05)
+variable        gzz equal (f_zhwall3[9]-${zh0w39})/(${zh0w39}-${zl0w39})/(1-2*${conRatio})
+variable        gzz equal (f_zhwall3[9]-0.0119740000601039)/(${zh0w39}-${zl0w39})/(1-2*${conRatio})
+variable        gzz equal (f_zhwall3[9]-0.0119740000601039)/(0.0119740000601039-${zl0w39})/(1-2*${conRatio})
+variable        gzz equal (f_zhwall3[9]-0.0119740000601039)/(0.0119740000601039--0.000274000060006313)/(1-2*${conRatio})
+variable        gzz equal (f_zhwall3[9]-0.0119740000601039)/(0.0119740000601039--0.000274000060006313)/(1-2*0.05)
+#
+#variable for shear: quasi-static
+variable        Imax equal 1.0e-3
+variable        rho equal 2650.0
+variable        dgam equal ${Imax}/v_aDmin*sqrt(v_pProb/${rho})
+variable        dgam equal 0.001/v_aDmin*sqrt(v_pProb/${rho})
+variable        dgam equal 0.001/v_aDmin*sqrt(v_pProb/2650)
+variable        vxMax equal v_dgam*(${zh0w39}-${zl0w39})*(1-2*${conRatio})
+variable        vxMax equal v_dgam*(0.0119740000601039-${zl0w39})*(1-2*${conRatio})
+variable        vxMax equal v_dgam*(0.0119740000601039--0.000274000060006313)*(1-2*${conRatio})
+variable        vxMax equal v_dgam*(0.0119740000601039--0.000274000060006313)*(1-2*0.05)
+variable        dotGamma equal 1.0 # /s
+variable        velx equal ${dotGamma}*(${zh0w39}-${zl0w39})*(1-2*${conRatio})
+variable        velx equal 1*(${zh0w39}-${zl0w39})*(1-2*${conRatio})
+variable        velx equal 1*(0.0119740000601039-${zl0w39})*(1-2*${conRatio})
+variable        velx equal 1*(0.0119740000601039--0.000274000060006313)*(1-2*${conRatio})
+variable        velx equal 1*(0.0119740000601039--0.000274000060006313)*(1-2*0.05)
+#
+#practical equilibrium condition
+variable        tolF1 equal v_pProb*v_aDmin*v_aDmin
+variable        aFtol equal 1e-4*v_tolF1
+variable        aTtol equal 1e-4*v_tolF1*v_aDmin
+variable        aEktol equal 1e-8*v_tolF1*v_aDmin
+variable        isEqForce equal v_aFmax<v_aFtol
+variable        isEqTorque equal v_aTmax<v_aTtol
+variable        isEqEk equal v_aEkmax<v_aEktol
+variable        isEq equal v_isEqForce*v_isEqTorque*v_isEqEk
+#variable for running
+variable        CSR equal 0.15 #cyclic stress ratio
+variable        totalStep equal 1.0/dt
+variable        loopStep equal 1000
+variable        loopCountMax equal floor(${totalStep}/${loopStep})
+variable        loopCountMax equal floor(500000000/${loopStep})
+variable        loopCountMax equal floor(500000000/1000)
+variable        loopCount loop ${loopCountMax}
+variable        loopCount loop 500000
+#---- Output files ----
+shell           mkdir output
+shell           mkdir output/4-shear
+shell           mkdir output/4-shear/visualization
+#file 1: macro.txt
+print           "N ke bvol eBvol eProb xl yl zl xh yh zh sxxProb syyProb szzProb sxyProb sxzProb syzProb sxzTopWall syzTopWall szzTopWall sxyBotWall sxzBotWall syzBotWall gxz gyz gzz"                     file output/4-shear/macro.txt screen no
+fix             macroOutput all print ${hstep}                     "${ostep} ${oke} ${bvol} ${eBvol} ${eProb} ${xl} ${yl} ${zl0w39} ${xh} ${yh} ${zhw39} ${sxxProb} ${syyProb} ${szzProb} ${sxyProb} ${sxzProb} ${syzProb} ${zhw3Sxz} ${zhw3Syz} ${zhw3Szz} ${zlw3Sxz} ${zlw3Syz} ${zlw3Szz} ${gxz} ${gyz} ${gzz}"                     append output/4-shear/macro.txt screen no title none
+fix             macroOutput all print 10000                     "${ostep} ${oke} ${bvol} ${eBvol} ${eProb} ${xl} ${yl} ${zl0w39} ${xh} ${yh} ${zhw39} ${sxxProb} ${syyProb} ${szzProb} ${sxyProb} ${sxzProb} ${syzProb} ${zhw3Sxz} ${zhw3Syz} ${zhw3Szz} ${zlw3Sxz} ${zlw3Syz} ${zlw3Szz} ${gxz} ${gyz} ${gzz}"                     append output/4-shear/macro.txt screen no title none
+#file 2: check.txt
+print           "N aFmax aFtol aTmax aTtol aEkmax aEktol"                     file output/4-shear/check.txt screen no
+fix             checkOutput all print ${hstep}                     "${ostep} ${aFmax} ${aFtol} ${aTmax} ${aTtol} ${aEkmax} ${aEktol}"                     append output/4-shear/check.txt screen no title none
+fix             checkOutput all print 10000                     "${ostep} ${aFmax} ${aFtol} ${aTmax} ${aTtol} ${aEkmax} ${aEktol}"                     append output/4-shear/check.txt screen no title none
+#file 3: micro_contact.txt
+print           "N Nc Np za zg zm Np0 Np1 Np2 Np3 Np4 Np5 Np6 Np7 Np8 Np9 Np10 Np11 Np12 Np13 Np14 Np15 Np16"                     file output/4-shear/micro_contact.txt screen no
+fix             microContactOutput all print ${hstep}                     "${ostep} ${Nc} ${Np} ${CNa} ${CNg} ${CNm} ${Np0} ${Np1} ${Np2} ${Np3} ${Np4} ${Np5} ${Np6} ${Np7} ${Np8} ${Np9} ${Np10} ${Np11} ${Np12} ${Np13} ${Np14} ${Np15} ${Np16}"                     append output/4-shear/micro_contact.txt screen no title none
+fix             microContactOutput all print 10000                     "${ostep} ${Nc} ${Np} ${CNa} ${CNg} ${CNm} ${Np0} ${Np1} ${Np2} ${Np3} ${Np4} ${Np5} ${Np6} ${Np7} ${Np8} ${Np9} ${Np10} ${Np11} ${Np12} ${Np13} ${Np14} ${Np15} ${Np16}"                     append output/4-shear/micro_contact.txt screen no title none
+#
+# #visualization
+# dump            dmpMesh all mesh/vtk ${hstep} output/4-shear/visualization/wall-*.vtp stress wear
+# dump            dmp all custom/vtk ${hstep} output/4-shear/visualization/particle-*.vtp id type type #                    x y z ix iy iz vx vy vz fx fy fz omegax omegay omegaz radius
+#
+#thermodynamic output settings
+#
+thermo_style    custom step v_oke v_eBvol v_eProb v_pProb v_CSR v_gxz v_sxzProb                             v_velx v_vxMax v_CNg v_isEq
+thermo          ${hstep}
+thermo          10000
+thermo_modify   lost warn norm no
+###Run
+run 0
+Resetting global state of Fix contacthistory Style contacthistory from restart file info
+Resetting per-atom state of Fix contacthistory Style contacthistory from restart file info
+Setting up run at Wed Jul 14 11:48:19 2021
+
+Memory usage per processor = 17.7343 Mbytes
+    Step            oke          eBvol          eProb          pProb            CSR            gxz        sxzProb           velx          vxMax            CNg           isEq 
+  400000              0      23.975173      23.988899             -0           0.15              0              0      0.0110232             -0              0              0 
+Loop time of 5e-06 on 2 procs for 0 steps with 15625 atoms, finish time Wed Jul 14 11:48:19 2021
+
+
+Pair  time (%) = 0 (0)
+Neigh time (%) = 0 (0)
+Comm  time (%) = 0 (0)
+Outpt time (%) = 0 (0)
+Other time (%) = 5e-06 (100)
+
+Nlocal:    7812.5 ave 8125 max 7500 min
+Histogram: 1 0 0 0 0 0 0 0 0 1
+Nghost:    1720 ave 1955 max 1485 min
+Histogram: 1 0 0 0 0 0 0 0 0 1
+Neighs:    11 ave 13 max 9 min
+Histogram: 1 0 0 0 0 0 0 0 0 1
+
+Total # of neighbors = 22
+Ave neighs/atom = 0.001408
+Neighbor list builds = 0
+Dangerous builds = 0
+#
+#file 1:
+print           "${ostep} ${oke} ${bvol} ${eBvol} ${eProb} ${xl} ${yl} ${zl0w39} ${xh} ${yh} ${zhw39} ${sxxProb} ${syyProb} ${szzProb} ${sxyProb} ${sxzProb} ${syzProb} ${zhw3Sxz} ${zhw3Syz} ${zhw3Szz} ${zlw3Sxz} ${zlw3Syz} ${zlw3Szz} ${gxz} ${gyz} ${gzz}"                     append output/4-shear/macro.txt screen no
+#file 2:
+print           "${ostep} ${aFmax} ${aFtol} ${aTmax} ${aTtol} ${aEkmax} ${aEktol}"                     append output/4-shear/check.txt screen no
+#file 3:
+print           "${ostep} ${Nc} ${Np} ${CNa} ${CNg} ${CNm} ${Np0} ${Np1} ${Np2} ${Np3} ${Np4} ${Np5} ${Np6} ${Np7} ${Np8} ${Np9} ${Np10} ${Np11} ${Np12} ${Np13} ${Np14} ${Np15} ${Np16}"                     append output/4-shear/micro_contact.txt screen no
+#
+#---- Constant-volume monotonic simple shear -----
+#variable        gamMax equal 0.50
+#variable        totalStep equal ${gamMax}/${dotGamma}/dt
+#fix             moveTopWall all move/mesh mesh zhwall3 linear ${velx} 0. 0.
+#fix             moveTopLayer topLayer move linear ${velx} 0. 0.
+#fix             moveBotWall all move/mesh mesh zlwall3 linear 0. 0. 0.
+#fix             moveBotLayer botLayer move linear 0. 0. 0.
+#print           "The total number of steps is ${totalStep}"
+#restart         ${rstep} restart/restart_4m_*.equil
+#run             ${totalStep}
+#
+#write_restart   restart/ussbp_mono.equil
+#---- Constant-volume cyclic shear with stress amplitude ----
+#
+variable        tauAmp equal ${CSR}*${pProb} # shear stress amplitude
+variable        tauAmp equal 0.15*${pProb} 
+variable        tauAmp equal 0.15*-0 
+#
+label           loop
+print "${tauAmp}"
+-0
+if "(${velx} > 0) && (${sxzProb} > ${tauAmp})" then     "variable velx equal -${dotGamma}*(${zh0w39}-${zl0w39})*(1-2*${conRatio})"
+if "(${velx} < 0) && (${sxzProb} < -${tauAmp})" then     "variable velx equal ${dotGamma}*(${zh0w39}-${zl0w39})*(1-2*${conRatio})"
+ERROR: Invalid Boolean syntax in if command (../variable.cpp:3730)

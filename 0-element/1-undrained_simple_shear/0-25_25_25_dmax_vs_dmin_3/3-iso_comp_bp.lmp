@@ -1,0 +1,317 @@
+#********************************************************************************#
+# @Author : Ming Yang
+# @Email  : ykevin09@gmail.com
+# @Date   : 2021-01-06
+# @Last Modified by     : Ming Yang
+# @Lost Modified Time   : 2021-05-18
+# @Function  : Isotropic compression in bi-periodic cell via servo control
+#       1. Compress the sample following a given K0 from until p=100kPa
+#       2. mu=0.5 for p-p
+# @Reference : 
+#
+#********************************************************************************#
+###Initialization
+#preliminaries
+units           si
+atom_style      granular
+atom_modify     map array
+boundary        p p m
+newton          off
+communicate     single vel yes
+#declare computation domain
+read_restart    restart/consol_2_20kPa.equil
+#neighbor listing
+neighbor        0.0001 bin
+neigh_modify    delay 0 
+
+###Setup
+#material and interaction properties required
+variable 	    Ep equal 7.0e10
+variable 	    nu equal 0.25
+variable 	    eps equal 0.8
+variable        mu equal 0.5
+variable        muPW equal 0.0
+variable        muR equal 0.1
+variable        muRPW equal 0.0
+variable        etaR equal 0.13
+variable        krF equal 2.25
+hard_particles  yes
+fix             m1 all property/global youngsModulus peratomtype ${Ep} ${Ep} 
+fix             m2 all property/global poissonsRatio peratomtype ${nu} ${nu}
+fix             m3 all property/global coefficientRestitution peratomtypepair 2 ${eps} ${eps} ${eps} ${eps}
+fix             m4 all property/global coefficientFriction peratomtypepair 2 ${mu} ${muPW} ${muPW} ${muPW}
+fix             m5 all property/global coefficientRollingFriction peratomtypepair 2 ${muR} ${muRPW} ${muRPW} ${muRPW}
+fix             m6 all property/global coefficientRollingViscousDamping peratomtypepair 2 ${etaR} ${etaR} ${etaR} ${etaR}
+fix             m7 all property/global rollingStiffness scalar ${krF}
+#servo walls
+variable        xl equal -0.0002
+variable        yl equal -0.0002 
+variable        zl equal -0.0002
+variable        xh equal 0.0098 
+variable        yh equal 0.0098
+variable        zh equal 0.0098
+variable        xa equal 0.5*(${xl}+${xh})
+variable        ya equal 0.5*(${yl}+${yh})
+variable        za equal 0.5*(${zl}+${zh})
+variable        l0 equal (${zh}-${zl}) #size of mesh
+#
+variable        FORCE equal 0.001
+variable        VMAX equal 0.02
+variable        KP equal 0.04
+variable        KI equal 0.0
+variable        KD equal 0.0
+variable        RATIO equal 0.01
+variable        SCALE equal (${xh}-${xl})/${l0}
+#
+fix             zservo1 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale ${SCALE} &
+                    move ${xa} ${ya} ${zl} com ${xa} ${ya} ${zl} ctrlPV force axis 0 0 +1 &
+                    target_val ${FORCE} vel_max ${VMAX} kp ${KP} ki ${KI} kd ${KD}
+fix             zservo2 all mesh/surface/stress/servo file input/mesh/plane.stl type 2 scale ${SCALE} &
+                    move ${xa} ${ya} ${zh} com ${xa} ${ya} ${zh} ctrlPV force axis 0 0 -1 & 
+                    target_val ${FORCE} vel_max ${VMAX} kp ${KP} ki ${KI} kd ${KD}
+fix             walls all wall/gran model hertz tangential no_history mesh n_meshes 2 &
+                    meshes zservo1 zservo2
+#
+variable        Axy equal lx*ly
+variable        K0 equal 1.0
+variable        PRESSURE equal 1.0e5
+variable        szzTarget equal 3*${PRESSURE}/(1+2*${K0})
+variable        sxxTarget equal ${K0}*${szzTarget}
+variable        syyTarget equal ${K0}*${szzTarget}
+variable        fxy equal ${szzTarget}*v_Axy
+#
+fix_modify      zservo1 servo/target_val v_fxy
+fix_modify      zservo2 servo/target_val v_fxy
+variable        zl equal f_zservo1[9]
+variable        zh equal f_zservo2[9]
+#
+#define the physics
+pair_style      gran model hertz tangential history rolling_friction epsd3&
+                    limitForce on torsionTorque on
+pair_coeff      * *
+#
+variable        xl equal xlo
+variable        xh equal xhi
+variable        yl equal ylo
+variable        yh equal yhi
+variable        conRatio equal 0.05
+variable        zTop equal (${zh}-${conRatio}*(${zh}-${zl}))
+region          regTop block ${xl} ${xh} ${yl} ${yh} ${zTop} ${zh}
+group           topLayer region regTop
+variable        zBot equal (${zl}+${conRatio}*(${zh}-${zl}))
+region          regBot block ${xl} ${xh} ${yl} ${yh} ${zl} ${zBot}
+group           botLayer region regBot
+group           atomAll type 1
+group           midGroup subtract atomAll topLayer botLayer
+#probReg
+variable        probRatio equal 0.075
+variable        probZt equal (${zh}-${probRatio}*(${zh}-${zl}))
+variable        probZb equal (${zl}+${probRatio}*(${zh}-${zl}))
+#
+###Detailed settings
+#integrator
+fix             integr all nve/sphere
+#timestep
+timestep        2.0e-9
+fix             ctg all check/timestep/gran 1000 0.05 0.05
+###Execution and further settings
+variable        hstep equal 10000
+#atom property and stress
+compute         atomProp all property/atom mass diameter z vx vy vz fx fy fz tqx tqy tqz
+compute         atomDmin all reduce min c_atomProp[2]
+variable        aDmin equal c_atomDmin
+variable        atomV atom c_atomProp[4]^2+c_atomProp[5]^2+c_atomProp[6]^2
+compute         atomVmax all reduce max v_atomV
+variable        aVmax equal sqrt(c_atomVmax)
+variable        atomF atom c_atomProp[7]^2+c_atomProp[8]^2+c_atomProp[9]^2
+compute         atomFmax all reduce max v_atomF
+variable        aFmax equal sqrt(c_atomFmax)
+variable        atomT atom c_atomProp[10]^2+c_atomProp[11]^2+c_atomProp[12]^2
+compute         atomTmax all reduce max v_atomT
+variable        aTmax equal sqrt(c_atomTmax)
+variable        atomEk atom 0.5*c_atomProp[1]*(c_atomProp[4]^2+c_atomProp[5]^2+c_atomProp[6]^2)
+compute         atomEkmax all reduce max v_atomEk
+variable        aEkmax equal c_atomEkmax
+#
+#homogenization based on the whole volume
+compute         atomStress all stress/atom virial
+variable        bvol equal lx*ly*(v_zh-v_zl) #Sample volume
+compute         bvolStress all reduce sum c_atomStress[1] c_atomStress[2] c_atomStress[3]&
+                                          c_atomStress[4] c_atomStress[5] c_atomStress[6]
+variable        pBvol equal -(c_bvolStress[1]+c_bvolStress[2]+c_bvolStress[3])/3/v_bvol
+variable        sxxBvol equal -(c_bvolStress[1])/v_bvol
+variable        syyBvol equal -(c_bvolStress[2])/v_bvol
+variable        szzBvol equal -(c_bvolStress[3])/v_bvol
+variable        sxyBvol equal (c_bvolStress[4])/v_bvol
+variable        sxzBvol equal (c_bvolStress[5])/v_bvol
+variable        syzBvol equal (c_bvolStress[6])/v_bvol
+variable        volMass equal mass(atomAll)/2650.0
+variable        eBvol equal (v_bvol-v_volMass)/v_volMass
+#
+#homogenization based on the whole volume based on probReg:
+variable        probVol equal lx*ly*(v_probZt-v_probZb) #probReg volume
+variable        conPi equal 4*PI/3
+variable        atomR atom 0.5*c_atomProp[2]
+variable        atomProbTop atom (c_atomProp[3]+v_atomR-v_probZt)
+variable        atomProbBot atom (v_probZb-c_atomProp[3]+v_atomR)
+variable        atomIsIn atom (v_atomProbTop<=0)&&(v_atomProbBot<=0)
+variable        atomIsCrossTop atom (v_atomProbTop>0)&&(c_atomProp[3]-v_atomR-v_probZt<0)
+variable        atomIsCrossBot atom (v_atomProbBot>0)&&(v_probZb-c_atomProp[3]-v_atomR<0)
+variable        atomIsNot atom (c_atomProp[3]-v_atomR-v_probZt>=0)||(v_probZb-c_atomProp[3]-v_atomR>=0)
+variable        atomProbVol atom v_conPi*v_atomIsIn*(v_atomR^3)+&
+v_conPi*v_atomIsCrossTop*(v_atomR^3-1/4*v_atomProbTop^2*(3*v_atomR-v_atomProbTop))+&
+v_conPi*v_atomIsCrossBot*(v_atomR^3-1/4*v_atomProbBot^2*(3*v_atomR-v_atomProbBot))+&
+v_conPi*v_atomIsNot*0
+variable        atomVol atom v_conPi*v_atomR*v_atomR*v_atomR
+variable        atomProbSxx atom v_atomProbVol/v_atomVol*c_atomStress[1]
+variable        atomProbSyy atom v_atomProbVol/v_atomVol*c_atomStress[2]
+variable        atomProbSzz atom v_atomProbVol/v_atomVol*c_atomStress[3]
+variable        atomProbSxy atom v_atomProbVol/v_atomVol*c_atomStress[4]
+variable        atomProbSxz atom v_atomProbVol/v_atomVol*c_atomStress[5]
+variable        atomProbSyz atom v_atomProbVol/v_atomVol*c_atomStress[6]
+compute         probStress all reduce sum v_atomProbSxx v_atomProbSyy v_atomProbSzz&
+                                          v_atomProbSxy v_atomProbSxz v_atomProbSyz
+variable        pProb equal -(c_probStress[1]+c_probStress[2]+c_probStress[3])/3/v_probVol
+variable        sxxProb equal -(c_probStress[1])/v_probVol
+variable        syyProb equal -(c_probStress[2])/v_probVol
+variable        szzProb equal -(c_probStress[3])/v_probVol
+variable        sxyProb equal (c_probStress[4])/v_probVol
+variable        sxzProb equal (c_probStress[5])/v_probVol
+variable        syzProb equal (c_probStress[6])/v_probVol
+compute         solidProbVol all reduce sum v_atomProbVol
+variable        eProb equal (v_probVol-c_solidProbVol)/c_solidProbVol
+#
+#
+compute         eng all ke
+variable        oke equal c_eng
+#
+#history
+#dump            dpp all local ${hstep} output/3-comp/contact/ppcontact-*.dat &
+#                    c_pp[1] c_pp[2] c_pp[3] &
+#                    c_pp[4] c_pp[5] c_pp[6] c_pp[7] c_pp[8] c_pp[9] & 
+#                    c_pp[10] c_pp[11] c_pp[12] &
+#                    c_pp[13] c_pp[14] c_pp[15] &
+#                    c_pp[16] c_pp[17] c_pp[18] &
+#                    c_pp[19]
+#dump            dpw all local ${hstep} output/3-comp/contact/pwcontact-*.dat & 
+#                    c_pw[1] c_pw[2] c_pw[3] & 
+#                    c_pw[4] c_pw[5] c_pw[6] c_pw[7] c_pw[8] c_pw[9] &
+#                    c_pw[10] c_pw[11] c_pw[12] &
+#                    c_pw[13] c_pw[14] c_pw[15] &
+#                    c_pw[16] c_pw[17] c_pw[18] &
+#                    c_pw[19]
+#visualization
+#dump            dmpMesh all mesh/vtk ${hstep} output/3-comp/visualization/wall-*.vtp stress wear
+#dump            dmp all custom/vtk ${hstep} output/3-comp/visualization/particle-*.vtp id type type &
+#                    x y z ix iy iz vx vy vz fx fy fz omegax omegay omegaz radius
+#state
+variable        ostep equal step
+variable        xl equal xlo
+variable        xh equal xhi
+variable        yl equal ylo
+variable        yh equal yhi
+variable        sxzTopWall equal f_zservo2[1]/(lx*ly)
+variable        syzTopWall equal f_zservo2[2]/(lx*ly)
+variable        szzTopWall equal f_zservo2[3]/(lx*ly)
+variable        sxzBotWall equal f_zservo1[1]/(lx*ly)
+variable        syzBotWall equal f_zservo1[2]/(lx*ly)
+variable        szzBotWall equal f_zservo1[3]/(lx*ly)
+#
+#variable for compression: quasi-static
+variable        Imax equal 1.0e-3
+variable        rho equal 2650.0
+variable        pMin equal 0.01e5
+variable        pI equal (v_pProb>=${pMin})*v_pProb+(v_pProb<${pMin})*${pMin}
+variable        dezz equal ${Imax}/v_aDmin*sqrt(v_pI/${rho})
+variable        vzMax equal v_dezz*(${zh}-${zl}) #compression
+#
+variable        alpha equal 1.0
+variable        h0 equal (v_zh-v_zl)
+variable        kppx equal ${alpha}*${KP}*ly*v_h0
+variable        kppy equal ${alpha}*${KP}*lx*v_h0 
+variable        velx0 equal -v_kppx*(${sxxTarget}-v_sxxProb)
+variable        vely0 equal -v_kppy*(${syyTarget}-v_syyProb)
+variable        isVx equal abs(v_velx0)<v_vzMax
+variable        isVy equal abs(v_vely0)<v_vzMax
+variable        velx equal v_isVx*v_velx0+(1-v_isVx)*v_vzMax*v_velx0/abs(v_velx0)
+variable        vely equal v_isVy*v_vely0+(1-v_isVy)*v_vzMax*v_vely0/abs(v_vely0)
+variable        velz equal -${KP}*(lx*ly)*(${szzTarget}-v_szzTopWall)
+ 
+#
+#practical equilibrium condition
+variable        tolF1 equal v_pProb*v_aDmin*v_aDmin
+variable        aFtol equal 1e-4*v_tolF1
+variable        aTtol equal 1e-4*v_tolF1*v_aDmin
+variable        aEktol equal 1e-8*v_tolF1*v_aDmin
+variable        isEqSxx equal abs(${sxxTarget}-v_sxxProb)/${sxxTarget}<1e-4
+variable        isEqSyy equal abs(${syyTarget}-v_syyProb)/${syyTarget}<1e-4
+variable        isEqSzz equal abs(${szzTarget}-v_szzProb)/${szzTarget}<1e-4
+variable        isEqForce equal v_aFmax<v_aFtol
+variable        isEqTorque equal v_aTmax<v_aTtol
+variable        isEqEk equal v_aEkmax<v_aEktol
+variable        isEq equal v_isEqSxx*v_isEqSyy*v_isEqSzz*v_isEqForce*v_isEqTorque*v_isEqEk
+#
+#variable for running
+variable        totalStep equal 5e7
+variable        loopStep equal 1000
+variable        loopCountMax equal floor(${totalStep}/${loopStep})
+variable        loopCount loop ${loopCountMax}
+#
+shell           mkdir output
+shell           mkdir output/3-comp
+print           "N ke bvol eBvol eProb&
+ xl yl zl xh yh zh&
+ sxxProb syyProb szzProb sxyProb sxzProb syzProb&
+ sxzTopWall syzTopWall szzTopWall sxyBotWall sxzBotWall syzBotWall" &
+    file output/3-comp/macro.txt screen no
+#
+print           "N aFmax aFtol aTmax aTtol aEkmax aEktol" &
+    file output/3-comp/check.txt screen no
+#
+fix             macroOutput all print ${hstep} &
+                    "${ostep} ${oke} ${bvol} ${eBvol} ${eProb}& 
+ ${xl} ${yl} ${zl} ${xh} ${yh} ${zh}&
+ ${sxxProb} ${syyProb} ${szzProb} ${sxyProb} ${sxzProb} ${syzProb}&
+ ${sxzTopWall} ${syzTopWall} ${szzTopWall} ${sxzBotWall} ${syzBotWall} ${szzBotWall}" &
+                    append output/3-comp/macro.txt screen no title none
+#
+fix             checkOutput all print ${hstep} &
+                    "${ostep} ${aFmax} ${aFtol} ${aTmax} ${aTtol} ${aEkmax} ${aEktol}" &
+                    append output/3-comp/check.txt screen no title none
+#
+#thermodynamic output settings
+thermo_style    custom step v_oke v_eBvol v_eProb v_szzProb v_szzTopWall &
+                            v_velx v_vely v_velz v_isEq
+thermo          ${hstep}
+thermo_modify   lost warn norm no
+###Run
+run             0
+#
+print           "${ostep} ${oke} ${bvol} ${eBvol} ${eProb}& 
+ ${xl} ${yl} ${zl} ${xh} ${yh} ${zh}&
+ ${sxxProb} ${syyProb} ${szzProb} ${sxyProb} ${sxzProb} ${syzProb}&
+ ${sxzTopWall} ${syzTopWall} ${szzTopWall} ${sxzBotWall} ${syzBotWall} ${szzBotWall}" &
+    append output/3-comp/macro.txt screen no 
+#
+print            "${ostep} ${aFmax} ${aFtol} ${aTmax} ${aTtol} ${aEkmax} ${aEktol}" &
+    append output/3-comp/check.txt screen no
+#
+#Servo bi-periodic for 100kPa
+label           loop
+fix             comp all deform 1 x vel ${velx} y vel ${vely}
+run             ${loopStep}
+next            loopCount
+jump            3-iso_comp_bp.lmp loop
+
+write_restart   restart/consol_3_100kPa.equil
+#
+###Check
+fix_modify      zservo1 servo/integrate stop
+fix_modify      zservo2 servo/integrate stop
+variable        velx equal 0.
+variable        vely equal 0.
+fix             comp all deform 1 x vel ${velx} y vel ${vely}
+#
+run             10000000
+write_restart   restart/consol_4_check.equil
+

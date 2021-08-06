@@ -1,0 +1,2 @@
+N aFmax aFtol aTmax aTtol aEkmax aEktol
+400000 0 -0 0 -0 0 -0

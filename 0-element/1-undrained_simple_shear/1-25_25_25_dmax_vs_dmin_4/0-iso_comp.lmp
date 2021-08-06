@@ -1,0 +1,204 @@
+#********************************************************************************#
+# @Author : Ming Yang
+# @Email  : ykevin09@gmail.com
+# @Date   : 2021-01-06
+# @Last Modified by     : Ming Yang
+# @Lost Modified Time   : 2021-05-15
+# @Function  : Import sample data and isotropic compression via velocity control
+#       1. Six (frictionless) mesh-plates to compress the sample until e=1.2
+#
+#
+# @Reference : 
+#********************************************************************************#
+###Initialization
+#preliminaries
+units           si
+atom_style      granular
+atom_modify     map array
+boundary        m m m
+newton          off
+communicate     single vel yes
+#declare computation domain
+read_data       input/data/Ottawa-F65.spl
+#neighbor listing
+neighbor        0.0001 bin
+neigh_modify    delay 0 #every 100
+
+###Setup
+#material and interaction properties required
+variable 	    atomEY equal 7.0e10 #1GP=1e9Pa
+variable 	    atomPO equal 0.25
+variable 	    atomCOR equal 0.8
+variable        atomCOF equal 0.05
+variable        atomWallCOF equal 0.0
+variable        atomCORF equal 0.1
+variable        atomWallCORF equal 0.0
+variable        atomCORVD equal 0.13
+variable 	    atomRS equal 2.25
+hard_particles  yes
+fix             mEY all property/global youngsModulus peratomtype ${atomEY} ${atomEY} 
+fix             mPO all property/global poissonsRatio peratomtype ${atomPO} ${atomPO}
+fix             mCOR all property/global coefficientRestitution peratomtypepair 2 ${atomCOR} ${atomCOR} ${atomCOR} ${atomCOR}
+fix             mCOF all property/global coefficientFriction peratomtypepair 2 ${atomCOF} ${atomWallCOF} ${atomWallCOF} ${atomWallCOF}
+fix             mCORF all property/global coefficientRollingFriction peratomtypepair 2 ${atomCORF} ${atomWallCORF} ${atomWallCORF} ${atomWallCORF}
+fix             mCORVD all property/global coefficientRollingViscousDamping peratomtypepair 2 ${atomCORVD} ${atomCORVD} ${atomCORVD} ${atomCORVD}
+fix             mRS all property/global rollingStiffness scalar ${atomRS}
+#
+#initial positions of stress walls
+variable        xl0 equal -0.00024
+variable        yl0 equal -0.00024 
+variable        zl0 equal -0.00024
+variable        xh0 equal 0.01132 
+variable        yh0 equal 0.01132
+variable        zh0 equal 0.01132
+variable        xa0 equal 0.5*(${xl0}+${xh0})
+variable        ya0 equal 0.5*(${yl0}+${yh0})
+variable        za0 equal 0.5*(${zl0}+${zh0})
+variable        mslx0 equal ${xh0}-${xl0}
+variable        msly0 equal ${yh0}-${yl0}
+variable        mslz0 equal ${zh0}-${zl0}
+variable        SCALE0 equal 1.00
+#
+fix             xlwall0 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE0} &
+                    rotate axis 0 1 0 angle 90 move ${xl0} ${ya0} ${za0} reference_point ${xl0} ${ya0} ${za0}
+fix             xhwall0 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE0} &
+                    rotate axis 0 1 0 angle 90 move ${xh0} ${ya0} ${za0} reference_point ${xh0} ${ya0} ${za0}
+fix             ylwall0 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE0} &
+                    rotate axis 1 0 0 angle 90 move ${xa0} ${yl0} ${za0} reference_point ${xa0} ${yl0} ${za0}
+fix             yhwall0 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE0} &
+                    rotate axis 1 0 0 angle 90 move ${xa0} ${yh0} ${za0} reference_point ${xa0} ${yh0} ${za0}
+fix             zlwall0 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE0} &
+                    move ${xa0} ${ya0} ${zl0} reference_point ${xa0} ${ya0} ${zl0}
+fix             zhwall0 all mesh/surface/stress file input/mesh/plane.stl type 2 scale ${SCALE0} &
+                    move ${xa0} ${ya0} ${zh0} reference_point ${xa0} ${ya0} ${zh0}
+fix             walls0 all wall/gran model hertz tangential no_history mesh n_meshes 6 &
+                    meshes xlwall0 ylwall0 zlwall0 xhwall0 yhwall0 zhwall0
+#
+variable        xlw07 equal f_xlwall0[7]
+variable        xhw07 equal f_xhwall0[7]
+variable        ylw08 equal f_ylwall0[8]
+variable        yhw08 equal f_yhwall0[8]
+variable        zlw09 equal f_zlwall0[9]
+variable        zhw09 equal f_zhwall0[9]
+variable        w0Axy equal (v_xhw07-v_xlw07)*(v_yhw08-v_ylw08)
+variable        w0Ayz equal (v_yhw08-v_ylw08)*(v_zhw09-v_zlw09)
+variable        w0Axz equal (v_xhw07-v_xlw07)*(v_zhw09-v_zlw09)
+variable        bvol equal (v_xhw07-v_xlw07)*(v_yhw08-v_ylw08)*(v_zhw09-v_zlw09)
+#
+#define the physics
+pair_style      gran model hertz tangential history rolling_friction epsd3&
+			        limitForce on torsionTorque on
+pair_coeff      * *
+#
+group           atomAll type 1
+#
+###Detailed settings
+#integrator
+fix             integr all nve/sphere
+#timestep
+timestep        2.0e-9
+fix             ctg all check/timestep/gran 1000 0.05 0.05
+###Execution and further settings
+variable        hstep equal 10000
+#atom property and stress
+compute         atomProp all property/atom mass diameter z vx vy vz
+compute         atomDmin all reduce min c_atomProp[2]
+variable        aDmin equal c_atomDmin
+variable        atomV atom c_atomProp[4]^2+c_atomProp[5]^2+c_atomProp[6]^2
+compute         atomVmax all reduce max v_atomV
+variable        aVmax equal sqrt(c_atomVmax)
+#
+#homogenization based on the volume surrounded by the mesh plates
+compute         atomStress all stress/atom virial
+compute         bvolStress all reduce sum c_atomStress[1] c_atomStress[2] c_atomStress[3]&
+                                          c_atomStress[4] c_atomStress[5] c_atomStress[6]
+variable        pBvol equal -(c_bvolStress[1]+c_bvolStress[2]+c_bvolStress[3])/3/v_bvol
+variable        sxxBvol equal -(c_bvolStress[1])/v_bvol
+variable        syyBvol equal -(c_bvolStress[2])/v_bvol
+variable        szzBvol equal -(c_bvolStress[3])/v_bvol
+variable        sxyBvol equal (c_bvolStress[4])/v_bvol
+variable        sxzBvol equal (c_bvolStress[5])/v_bvol
+variable        syzBvol equal (c_bvolStress[6])/v_bvol
+variable        volMass equal mass(atomAll)/2650.0
+variable        eBvol equal (v_bvol-v_volMass)/v_volMass
+#
+#
+compute         eng all ke
+variable        oke equal c_eng
+#
+#particle-particle and particle-wall contact info
+#compute         pp all pair/gran/local pos id force force_normal force_tangential delta
+#compute         pw all wall/gran/local pos id force force_normal force_tangential delta
+#void ratio (neglecting overlap)
+#history
+#dump            dpp all local ${hstep} output/0-comp/contact/ppcontact-*.dat &
+#                    c_pp[1] c_pp[2] c_pp[3] &
+#                    c_pp[4] c_pp[5] c_pp[6] c_pp[7] c_pp[8] c_pp[9] & 
+#                    c_pp[10] c_pp[11] c_pp[12] &
+#                    c_pp[13] c_pp[14] c_pp[15] &
+#                    c_pp[16] c_pp[17] c_pp[18] &
+#                    c_pp[19]
+#dump            dpw all local ${hstep} output/0-comp/contact/pwcontact-*.dat & 
+#                    c_pw[1] c_pw[2] c_pw[3] & 
+#                    c_pw[4] c_pw[5] c_pw[6] c_pw[7] c_pw[8] c_pw[9] &
+#                    c_pw[10] c_pw[11] c_pw[12] &
+#                    c_pw[13] c_pw[14] c_pw[15] &
+#                    c_pw[16] c_pw[17] c_pw[18] &
+#                    c_pw[19]
+#state
+variable        ostep equal step
+variable        xlw0Sxx equal f_xlwall0[1]/v_w0Ayz
+variable        xhw0Sxx equal f_xhwall0[1]/v_w0Ayz
+variable        ylw0Syy equal f_ylwall0[2]/v_w0Axz
+variable        yhw0Syy equal f_yhwall0[2]/v_w0Axz
+variable        zlw0Szz equal f_zlwall0[3]/v_w0Axy
+variable        zhw0Szz equal f_zhwall0[3]/v_w0Axy
+#
+#variable for compression
+variable        vel equal 0.1
+variable        rstep equal v_hstep*10
+variable        totalStep equal 2e8
+#
+shell           mkdir output
+shell           mkdir output/0-comp
+shell           mkdir output/0-comp/visualization
+#
+print           "N ke bvol eBvol&
+ xl yl zl xh yh zh&
+ sxxLeft sxxRight syyBack syyFront szzBot szzTop pBvol" &
+    file output/0-comp/macro.txt screen no
+#
+fix             macroOutput all print ${hstep} &
+                    "${ostep} ${oke} ${bvol} ${eBvol}& 
+ ${xlw07} ${ylw08} ${zlw09} ${xhw07} ${yhw08} ${zhw09}&
+ ${xlw0Sxx} ${xhw0Sxx} ${ylw0Syy} ${yhw0Syy} ${zlw0Szz} ${zhw0Szz} ${pBvol}" &
+                    append output/0-comp/macro.txt screen no title none
+#
+# #visualization
+# dump            dmpMesh all mesh/vtk ${hstep} output/0-comp/visualization/wall-*.vtp stress wear
+# dump            dmp all custom/vtk ${hstep} output/0-comp/visualization/particle-*.vtp id type type &
+#                    x y z ix iy iz vx vy vz fx fy fz omegax omegay omegaz radius
+#
+#thermodynamic output settings
+thermo_style    custom step v_oke v_eBvol v_pBvol v_aVmax v_xhw0Sxx v_yhw0Syy v_zhw0Szz
+thermo          ${hstep}
+thermo_modify   lost warn norm no
+###run
+#isotropic compression until voidRatio = 1.2
+fix             Fmxlw0 all move/mesh mesh xlwall0 linear ${vel} 0. 0.
+fix             Fmylw0 all move/mesh mesh ylwall0 linear 0. ${vel} 0.
+fix             Fmzlw0 all move/mesh mesh zlwall0 linear 0. 0. ${vel}
+fix             Fmxhw0 all move/mesh mesh xhwall0 linear -${vel} 0. 0.
+fix             Fmyhw0 all move/mesh mesh yhwall0 linear 0. -${vel} 0.
+fix             Fmzhw0 all move/mesh mesh zhwall0 linear 0. 0. -${vel}
+#
+run             0
+print             "${ostep} ${oke} ${bvol} ${eBvol}& 
+ ${xlw07} ${ylw08} ${zlw09} ${xhw07} ${yhw08} ${zhw09}&
+ ${xlw0Sxx} ${xhw0Sxx} ${ylw0Syy} ${yhw0Syy} ${zlw0Szz} ${zhw0Szz} ${pBvol}" &
+    append output/0-comp/macro.txt screen no
+#
+run             ${totalStep} every ${rstep} &
+    "if '${eBvol} < 1.2' then &
+        'write_restart   restart/consol_0.equil' &
+        'quit'"
